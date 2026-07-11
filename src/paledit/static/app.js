@@ -5,6 +5,9 @@ const itemTemplate = document.querySelector('#item-template');
 const itemResults = document.querySelector('#item-results');
 const itemSummary = document.querySelector('#item-summary');
 const itemQuery = document.querySelector('#item-query');
+const palResults = document.querySelector('#pal-results');
+const palSummary = document.querySelector('#pal-summary');
+const palQuery = document.querySelector('#pal-query');
 
 async function scan() {
   worldsNode.innerHTML = '<div class="empty">正在读取存档头…</div>';
@@ -69,5 +72,28 @@ itemQuery.addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => loadItems(itemQuery.value), 180);
 });
+let palSearchTimer;
+async function loadPals(query = '') {
+  const response = await fetch(`/api/pals?q=${encodeURIComponent(query)}&limit=100`);
+  const data = await response.json();
+  palSummary.textContent = `${data.total_pals.toLocaleString()} 个 CharacterID · ${data.localized_pals.toLocaleString()} 个中文名称 · PalDB 1.0 数据`;
+  palResults.innerHTML = '';
+  for (const pal of data.results) {
+    const row = itemTemplate.content.firstElementChild.cloneNode(true);
+    row.querySelector('.item-name').textContent = pal.name_zh;
+    row.querySelector('.item-id').textContent = pal.character_id;
+    const status = row.querySelector('.localization');
+    status.textContent = pal.localized ? '中文' : '待本地化';
+    if (!pal.localized) status.classList.add('pending');
+    row.addEventListener('click', () => navigator.clipboard.writeText(pal.character_id));
+    palResults.append(row);
+  }
+  if (!data.results.length) palResults.innerHTML = '<div class="empty">没有匹配的 CharacterID</div>';
+}
+palQuery.addEventListener('input', () => {
+  clearTimeout(palSearchTimer);
+  palSearchTimer = setTimeout(() => loadPals(palQuery.value), 180);
+});
 scan();
 loadItems();
+loadPals();

@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .items import get_item, search_items
+from .pals import search_pals
 from .parser import load_character_data
 from .save import InvalidSaveError, discover_worlds, sha256
 
@@ -38,6 +39,11 @@ def item(item_id: str) -> dict[str, object]:
     if result is None:
         raise HTTPException(status_code=404, detail=f"未知道具 ID：{item_id}")
     return result
+
+
+@app.get("/api/pals")
+def pals(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+    return search_pals(q, limit)
 
 
 @app.get("/api/worlds")
