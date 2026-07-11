@@ -6,20 +6,30 @@ from typing import Any
 CHARACTER_RAW_PATH = ".worldSaveData.CharacterSaveParameterMap.Value.RawData"
 
 
+def character_custom_properties() -> dict[str, object]:
+    from palworld_save_tools.paltypes import PALWORLD_CUSTOM_PROPERTIES
+
+    return {CHARACTER_RAW_PATH: PALWORLD_CUSTOM_PROPERTIES[CHARACTER_RAW_PATH]}
+
+
+def open_world(level_path: Path):
+    from palworld_save_tools.gvas import GvasFile
+    from palworld_save_tools.palsav import decompress_sav_to_gvas
+    from palworld_save_tools.paltypes import PALWORLD_TYPE_HINTS
+
+    data = level_path.expanduser().resolve().read_bytes()
+    raw_gvas, save_type = decompress_sav_to_gvas(data)
+    gvas = GvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, character_custom_properties())
+    return gvas, save_type
+
+
 def load_character_data(level_path: Path) -> dict[str, Any]:
     """Load the 1.0 world while decoding only the proven character raw structure.
 
     Unknown and currently incompatible raw structures remain opaque, which is
     essential for future lossless writes.
     """
-    from palworld_save_tools.gvas import GvasFile
-    from palworld_save_tools.palsav import decompress_sav_to_gvas
-    from palworld_save_tools.paltypes import PALWORLD_CUSTOM_PROPERTIES, PALWORLD_TYPE_HINTS
-
-    data = level_path.expanduser().resolve().read_bytes()
-    raw_gvas, save_type = decompress_sav_to_gvas(data)
-    custom = {CHARACTER_RAW_PATH: PALWORLD_CUSTOM_PROPERTIES[CHARACTER_RAW_PATH]}
-    gvas = GvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, custom)
+    gvas, save_type = open_world(level_path)
     world = gvas.properties["worldSaveData"]["value"]
     characters = world["CharacterSaveParameterMap"]["value"]
     return {
@@ -28,4 +38,3 @@ def load_character_data(level_path: Path) -> dict[str, Any]:
         "world_property_count": len(world),
         "characters": characters,
     }
-

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -9,6 +9,7 @@ from .items import get_item, search_items
 from .pals import search_pals
 from .parser import load_character_data
 from .save import InvalidSaveError, discover_worlds, sha256
+from .world import list_users, update_user
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
@@ -68,6 +69,23 @@ def inspect_world(path: str) -> dict[str, object]:
         "level_sha256": sha256(level),
         "character_count": parsed["character_count"],
         "world_property_count": parsed["world_property_count"],
-        "write_enabled": False,
-        "compatibility": "Palworld 1.0 PlM/Oodle read-only",
+        "write_enabled": True,
+        "compatibility": "Palworld 1.0 PlM 读取 / Pal 支持的 PlZ 安全写入",
     }
+
+
+@app.get("/api/world/users")
+def users(path: str) -> dict[str, object]:
+    try:
+        return list_users(Path(path))
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"读取用户失败：{error}") from error
+
+
+@app.patch("/api/world/users/{player_uid}")
+def patch_user(player_uid: str, path: str, payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        expected = str(payload.pop("expected_sha256"))
+        return update_user(Path(path), player_uid, payload, expected)
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error

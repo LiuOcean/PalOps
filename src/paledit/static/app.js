@@ -8,6 +8,12 @@ const itemQuery = document.querySelector('#item-query');
 const palResults = document.querySelector('#pal-results');
 const palSummary = document.querySelector('#pal-summary');
 const palQuery = document.querySelector('#pal-query');
+const userPanel = document.querySelector('#user-panel');
+const usersNode = document.querySelector('#users');
+const userSummary = document.querySelector('#user-summary');
+const userTemplate = document.querySelector('#user-template');
+let activeWorld = null;
+let activeWorldHash = null;
 
 async function scan() {
   worldsNode.innerHTML = '<div class="empty">正在读取存档头…</div>';
@@ -41,7 +47,9 @@ function renderWorld(world) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || '诊断失败');
       result.className = 'result ok';
-      result.textContent = `兼容 · ${data.character_count} 个角色实体 · 写入保持关闭`;
+      result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可安全编辑用户`;
+      activeWorld = world.path;
+      await loadUsers();
     } catch (error) {
       result.className = 'result error'; result.textContent = error.message;
     } finally { button.disabled = false; }
@@ -49,7 +57,55 @@ function renderWorld(world) {
   return node;
 }
 
+async function loadUsers() {
+  if (!activeWorld) return;
+  userPanel.classList.remove('hidden');
+  usersNode.innerHTML = '<div class="empty">正在关联用户、玩家文件与帕鲁…</div>';
+  const response = await fetch(`/api/world/users?path=${encodeURIComponent(activeWorld)}`);
+  const data = await response.json();
+  if (!response.ok) { usersNode.innerHTML = `<div class="empty">${data.detail}</div>`; return; }
+  activeWorldHash = data.level_sha256;
+  userSummary.textContent = `${data.users.length} 个用户 · 所有字段以 Palworld 原始类型读写`;
+  usersNode.innerHTML = '';
+  for (const user of data.users) usersNode.append(renderUser(user));
+}
+
+function renderUser(user) {
+  const card = userTemplate.content.firstElementChild.cloneNode(true);
+  card.querySelector('.user-name').textContent = user.nickname || '未命名用户';
+  card.querySelector('.user-id').textContent = user.player_uid;
+  card.querySelector('.pal-count').textContent = `${user.pal_count} 只帕鲁`;
+  const form = card.querySelector('form');
+  for (const field of ['nickname','level','experience','unused_status_points','satiety']) form.elements[field].value = user[field];
+  card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
+  const palBox = card.querySelector('.pal-list div');
+  for (const pal of user.pals) {
+    const row = document.createElement('div'); row.className = 'pal-chip';
+    const label = document.createElement('span');
+    label.textContent = `${pal.name_zh}${pal.nickname ? ` · ${pal.nickname}` : ''} · Lv.${pal.level}`;
+    const id = document.createElement('code'); id.textContent = pal.character_id;
+    row.append(label, id);
+    palBox.append(row);
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = form.querySelector('.save-user'); const status = form.querySelector('.save-result');
+    button.disabled = true; status.textContent = '正在备份、写入并重新解析…';
+    const body = {expected_sha256: activeWorldHash};
+    for (const field of ['nickname','level','experience','unused_status_points','satiety']) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
+    try {
+      const response = await fetch(`/api/world/users/${user.player_uid}?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const data = await response.json(); if (!response.ok) throw new Error(data.detail);
+      activeWorldHash = data.level_sha256; status.textContent = `已保存，备份：${data.backup_path}`;
+      await loadUsers();
+    } catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  return card;
+}
+
 document.querySelector('#refresh').addEventListener('click', scan);
+document.querySelector('#reload-users').addEventListener('click', loadUsers);
 let searchTimer;
 async function loadItems(query = '') {
   const response = await fetch(`/api/items?q=${encodeURIComponent(query)}&limit=100`);

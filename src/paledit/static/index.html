@@ -18,7 +18,11 @@
       <div class="panel-head"><div><h2>服务器世界</h2><p id="root">正在发现 Save 目录…</p></div><button id="refresh">重新扫描</button></div>
       <div id="worlds" class="worlds"><div class="empty">正在读取存档头…</div></div>
     </section>
-    <section class="panel item-panel">
+    <section id="user-panel" class="panel item-panel hidden">
+      <div class="panel-head"><div><h2>当前存档用户</h2><p id="user-summary">选择世界后加载用户</p></div><button id="reload-users">重新读取</button></div>
+      <div id="users" class="user-grid"></div>
+    </section>
+    <details class="reference-panel"><summary>内部 ID 中文参考</summary><section class="panel item-panel">
       <div class="panel-head"><div><h2>道具 ID 中文索引</h2><p id="item-summary">正在加载 1.0 道具数据…</p></div></div>
       <label class="search"><span>搜索</span><input id="item-query" type="search" placeholder="输入中文名称或内部 ID，例如：帕鲁球 / PalSphere"></label>
       <div id="item-results" class="item-results"></div>
@@ -27,7 +31,7 @@
       <div class="panel-head"><div><h2>帕鲁 CharacterID 中文索引</h2><p id="pal-summary">正在加载 1.0 帕鲁数据…</p></div></div>
       <label class="search"><span>搜索</span><input id="pal-query" type="search" placeholder="输入中文名称或 CharacterID，例如：棉悠悠 / SheepBall"></label>
       <div id="pal-results" class="item-results"></div>
-    </section>
+    </section></details>
   </main>
   <template id="world-template">
     <article class="world-card">
@@ -38,6 +42,22 @@
   </template>
   <template id="item-template">
     <button class="item-row"><span class="item-name"></span><code class="item-id"></code><span class="localization"></span></button>
+  </template>
+  <template id="user-template">
+    <article class="user-card">
+      <div class="user-title"><div><h3 class="user-name"></h3><code class="user-id"></code></div><span class="pal-count"></span></div>
+      <form class="user-form">
+        <label>用户昵称<input name="nickname" maxlength="64"></label>
+        <label>等级<input name="level" type="number" min="1" max="100"></label>
+        <label>经验值<input name="experience" type="number" min="0"></label>
+        <label>未分配属性点<input name="unused_status_points" type="number" min="0" max="65535"></label>
+        <label>饱食度<input name="satiety" type="number" min="0" max="100" step="0.01"></label>
+        <div class="readonly-data"></div>
+        <button type="submit" class="save-user">备份并保存</button>
+        <span class="save-result"></span>
+      </form>
+      <details class="pal-list"><summary>查看该用户的帕鲁</summary><div></div></details>
+    </article>
   </template>
   <script src="/assets/app.js"></script>
 </body>
