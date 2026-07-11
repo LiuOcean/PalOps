@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .pals import load_pal_index
+from .items import load_item_index
 from .parser import character_custom_properties, open_world
 from .save import sha256
 
@@ -32,8 +33,56 @@ def guid_of(prop: dict[str, Any] | None) -> str:
     return str(value_of(prop, "00000000-0000-0000-0000-000000000000"))
 
 
+def stat_value(prop: dict[str, Any] | None) -> int | float:
+    value = value_of(prop, 0)
+    if isinstance(value, dict) and "Value" in value:
+        value = value_of(value["Value"], 0)
+    if isinstance(prop, dict) and prop.get("struct_type") == "FixedPoint64":
+        return round(float(value) / 1000, 3)
+    return value
+
+
 def parameter_of(entity: dict[str, Any]) -> dict[str, Any]:
     return entity["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"]
+
+
+def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
+    from palworld_save_tools.gvas import GvasFile
+    from palworld_save_tools.palsav import decompress_sav_to_gvas
+    from palworld_save_tools.paltypes import PALWORLD_TYPE_HINTS
+
+    filename = f"{player_uid.split('-')[0].upper()}000000000000000000000000.sav"
+    raw, _ = decompress_sav_to_gvas((world_path / "Players" / filename).read_bytes())
+    save = GvasFile.read(raw, PALWORLD_TYPE_HINTS, {}).properties["SaveData"]["value"]
+    info = save["InventoryInfo"]["value"]
+    labels = {
+        "CommonContainerId": "背包",
+        "EssentialContainerId": "重要物品",
+        "WeaponLoadOutContainerId": "武器装备",
+        "PlayerEquipArmorContainerId": "防具装备",
+        "FoodEquipContainerId": "食物装备",
+    }
+    return {label: guid_of(info[key]["value"]["ID"]) for key, label in labels.items() if key in info}
+
+
+def inventory_containers(gvas: Any) -> dict[str, list[dict[str, object]]]:
+    item_names = {row["id"]: row["name_zh"] for row in load_item_index()["items"]}
+    rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
+    result: dict[str, list[dict[str, object]]] = {}
+    for container in rows:
+        container_id = guid_of(container["key"].get("ID"))
+        slots = container["value"].get("Slots", {}).get("value", {}).get("values", [])
+        result[container_id] = []
+        for slot in slots:
+            raw = slot["RawData"]["value"]
+            item_id = str(raw["item"]["static_id"])
+            result[container_id].append({
+                "slot_index": int(raw["slot_index"]),
+                "item_id": item_id,
+                "name_zh": item_names.get(item_id, item_id),
+                "count": int(raw["count"]),
+            })
+    return result
 
 
 def status_points(prop: dict[str, Any] | None) -> dict[str, int]:
@@ -59,6 +108,7 @@ def list_users(world_path: Path) -> dict[str, object]:
     gvas, _ = open_world(world_path / "Level.sav")
     entities = gvas.properties["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
     pal_names = {row["character_id"]: row["name_zh"] for row in load_pal_index()["pals"]}
+    containers = inventory_containers(gvas)
     users: dict[str, dict[str, object]] = {}
     pals_by_owner: dict[str, list[dict[str, object]]] = {}
     for entity in entities:
@@ -73,14 +123,15 @@ def list_users(world_path: Path) -> dict[str, object]:
                 "nickname": value_of(param.get("NickName"), ""),
                 "level": int(value_of(param.get("Level"), 1)),
                 "experience": int(value_of(param.get("Exp"), 0)),
-                "hp": value_of(param.get("Hp"), 0),
-                "shield_hp": value_of(param.get("ShieldHP"), 0),
+                "hp": stat_value(param.get("Hp")),
+                "shield_hp": stat_value(param.get("ShieldHP")),
                 "satiety": round(float(value_of(param.get("FullStomach"), 0)), 2),
                 "unused_status_points": int(value_of(param.get("UnusedStatusPoint"), 0)),
                 "status_points": status_points(param.get("GotStatusPointList")),
                 "extra_status_points": status_points(param.get("GotExStatusPointList")),
                 "voice_id": int(value_of(param.get("VoiceID"), 0)),
                 "pals": [],
+                "inventories": {},
             }
         else:
             owner = guid_of(param.get("OwnerPlayerUId"))
@@ -101,12 +152,31 @@ def list_users(world_path: Path) -> dict[str, object]:
     for uid, user in users.items():
         user["pals"] = sorted(pals_by_owner.get(uid, []), key=lambda pal: (str(pal["name_zh"]), str(pal["instance_id"])))
         user["pal_count"] = len(user["pals"])
+        try:
+            ids = player_inventory_ids(world_path, uid)
+            user["inventories"] = {label: containers.get(container_id, []) for label, container_id in ids.items()}
+            user["inventory_container_ids"] = ids
+        except (FileNotFoundError, KeyError):
+            user["inventories"] = {}
     return {"world_id": world_path.name, "level_sha256": sha256(world_path / "Level.sav"), "users": list(users.values())}
 
 
-def update_user(world_path: Path, player_uid: str, changes: dict[str, object], expected_sha256: str) -> dict[str, object]:
+def _write_world(world_path: Path, gvas: Any) -> Path:
     from palworld_save_tools.palsav import compress_gvas_to_sav
 
+    level_path = world_path / "Level.sav"
+    backup_root = world_path / "PalEdit-Backup" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    shutil.copytree(world_path, backup_root, ignore=shutil.ignore_patterns("backup", "PalEdit-Backup"))
+    raw = copy.deepcopy(gvas).write(character_custom_properties())
+    output = compress_gvas_to_sav(raw, 0x32, True)
+    temp_path = level_path.with_suffix(".sav.paledit.tmp")
+    temp_path.write_bytes(output)
+    open_world(temp_path)
+    os.replace(temp_path, level_path)
+    return backup_root
+
+
+def update_user(world_path: Path, player_uid: str, changes: dict[str, object], expected_sha256: str) -> dict[str, object]:
     world_path = world_path.expanduser().resolve()
     level_path = world_path / "Level.sav"
     current_hash = sha256(level_path)
@@ -145,17 +215,41 @@ def update_user(world_path: Path, player_uid: str, changes: dict[str, object], e
         if field == "nickname" and "FilteredNickName" in target:
             set_value(target["FilteredNickName"], value_of(target[prop_name]))
 
-    backup_root = world_path / "PalEdit-Backup" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
-    shutil.copytree(world_path, backup_root, ignore=shutil.ignore_patterns("backup", "PalEdit-Backup"))
-    raw = copy.deepcopy(gvas).write(character_custom_properties())
-    # pyooz on macOS currently exposes Oodle decompression only. Palworld's
-    # supported PlZ container remains writable and is what established editors
-    # use for cross-platform saves, so macOS writes use PlZ/zlib save type 0x32.
-    output = compress_gvas_to_sav(raw, 0x32, True)
-    temp_path = level_path.with_suffix(".sav.paledit.tmp")
-    temp_path.write_bytes(output)
-    open_world(temp_path)
-    os.replace(temp_path, level_path)
+    backup_root = _write_world(world_path, gvas)
+    result = list_users(world_path)
+    result["backup_path"] = str(backup_root)
+    return result
+
+
+def update_inventory_slot(world_path: Path, player_uid: str, category: str, slot_index: int, item_id: str, count: int, expected_sha256: str) -> dict[str, object]:
+    world_path = world_path.expanduser().resolve()
+    level_path = world_path / "Level.sav"
+    if sha256(level_path) != expected_sha256:
+        raise ValueError("Level.sav 已变化，请重新加载后再保存")
+    valid_items = {row["id"] for row in load_item_index()["items"]}
+    if item_id not in valid_items:
+        raise ValueError(f"Palworld 不存在该道具 ID：{item_id}")
+    count = max(0, min(999999, int(count)))
+    ids = player_inventory_ids(world_path, player_uid)
+    if category not in ids:
+        raise ValueError(f"用户没有该容器：{category}")
+    gvas, _ = open_world(level_path)
+    rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
+    target_id = ids[category]
+    found = False
+    for container in rows:
+        if guid_of(container["key"].get("ID")) != target_id:
+            continue
+        for slot in container["value"].get("Slots", {}).get("value", {}).get("values", []):
+            raw = slot["RawData"]["value"]
+            if int(raw["slot_index"]) == slot_index:
+                raw["item"]["static_id"] = item_id
+                raw["count"] = count
+                found = True
+                break
+    if not found:
+        raise ValueError(f"没有找到槽位：{category} #{slot_index}")
+    backup_root = _write_world(world_path, gvas)
     result = list_users(world_path)
     result["backup_path"] = str(backup_root)
     return result

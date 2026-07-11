@@ -4,12 +4,15 @@ from pathlib import Path
 from typing import Any
 
 CHARACTER_RAW_PATH = ".worldSaveData.CharacterSaveParameterMap.Value.RawData"
+ITEM_CONTAINER_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.RawData"
+ITEM_SLOT_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.Slots.Slots.RawData"
 
 
 def character_custom_properties() -> dict[str, object]:
     from palworld_save_tools.paltypes import PALWORLD_CUSTOM_PROPERTIES
 
-    return {CHARACTER_RAW_PATH: PALWORLD_CUSTOM_PROPERTIES[CHARACTER_RAW_PATH]}
+    paths = [CHARACTER_RAW_PATH, ITEM_CONTAINER_RAW_PATH, ITEM_SLOT_RAW_PATH]
+    return {path: PALWORLD_CUSTOM_PROPERTIES[path] for path in paths}
 
 
 def open_world(level_path: Path):

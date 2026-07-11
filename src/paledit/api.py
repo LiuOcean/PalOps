@@ -9,7 +9,7 @@ from .items import get_item, search_items
 from .pals import search_pals
 from .parser import load_character_data
 from .save import InvalidSaveError, discover_worlds, sha256
-from .world import list_users, update_user
+from .world import list_users, update_inventory_slot, update_user
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
@@ -87,5 +87,16 @@ def patch_user(player_uid: str, path: str, payload: dict = Body(...)) -> dict[st
     try:
         expected = str(payload.pop("expected_sha256"))
         return update_user(Path(path), player_uid, payload, expected)
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.patch("/api/world/users/{player_uid}/inventory")
+def patch_inventory(player_uid: str, path: str, payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        return update_inventory_slot(
+            Path(path), player_uid, str(payload["category"]), int(payload["slot_index"]),
+            str(payload["item_id"]), int(payload["count"]), str(payload["expected_sha256"]),
+        )
     except (KeyError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

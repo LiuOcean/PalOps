@@ -12,8 +12,11 @@ const userPanel = document.querySelector('#user-panel');
 const usersNode = document.querySelector('#users');
 const userSummary = document.querySelector('#user-summary');
 const userTemplate = document.querySelector('#user-template');
+const playerDetail = document.querySelector('#player-detail');
 let activeWorld = null;
 let activeWorldHash = null;
+let loadedUsers = [];
+let selectedUserId = null;
 
 async function scan() {
   worldsNode.innerHTML = '<div class="empty">正在读取存档头…</div>';
@@ -47,7 +50,7 @@ function renderWorld(world) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || '诊断失败');
       result.className = 'result ok';
-      result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可安全编辑用户`;
+      result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可编辑用户与道具`;
       activeWorld = world.path;
       await loadUsers();
     } catch (error) {
@@ -66,8 +69,27 @@ async function loadUsers() {
   if (!response.ok) { usersNode.innerHTML = `<div class="empty">${data.detail}</div>`; return; }
   activeWorldHash = data.level_sha256;
   userSummary.textContent = `${data.users.length} 个用户 · 所有字段以 Palworld 原始类型读写`;
+  loadedUsers = data.users;
   usersNode.innerHTML = '';
-  for (const user of data.users) usersNode.append(renderUser(user));
+  for (const user of data.users) {
+    const button = document.createElement('button');
+    const name = document.createElement('span'); name.textContent = user.nickname || '未命名用户';
+    const meta = document.createElement('small'); meta.textContent = `Lv.${user.level} · ${user.pal_count} 只帕鲁`;
+    button.append(name, meta);
+    button.classList.toggle('active', user.player_uid === selectedUserId);
+    button.addEventListener('click', () => selectUser(user.player_uid));
+    usersNode.append(button);
+  }
+  if (!selectedUserId || !data.users.some(user => user.player_uid === selectedUserId)) selectedUserId = data.users[0]?.player_uid;
+  selectUser(selectedUserId);
+}
+
+function selectUser(playerUid) {
+  selectedUserId = playerUid;
+  [...usersNode.children].forEach((node, index) => node.classList.toggle('active', loadedUsers[index]?.player_uid === playerUid));
+  const user = loadedUsers.find(row => row.player_uid === playerUid);
+  playerDetail.innerHTML = '';
+  if (user) playerDetail.append(renderUser(user));
 }
 
 function renderUser(user) {
@@ -87,6 +109,17 @@ function renderUser(user) {
     row.append(label, id);
     palBox.append(row);
   }
+  const inventoryBox = card.querySelector('.inventory-list');
+  for (const [category, slots] of Object.entries(user.inventories || {})) {
+    const group = document.createElement('div'); group.className = 'inventory-group';
+    const title = document.createElement('h4'); title.textContent = `${category} · ${slots.length} 个槽位`; group.append(title);
+    for (const slot of slots) group.append(renderInventorySlot(user, category, slot));
+    inventoryBox.append(group);
+  }
+  card.querySelectorAll('.detail-tabs button').forEach(button => button.addEventListener('click', () => {
+    card.querySelectorAll('.detail-tabs button').forEach(node => node.classList.toggle('active', node === button));
+    card.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('hidden', pane.dataset.pane !== button.dataset.tab));
+  }));
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const button = form.querySelector('.save-user'); const status = form.querySelector('.save-result');
@@ -102,6 +135,28 @@ function renderUser(user) {
     finally { button.disabled = false; }
   });
   return card;
+}
+
+function renderInventorySlot(user, category, slot) {
+  const row = document.createElement('div'); row.className = 'inventory-row';
+  const number = document.createElement('span'); number.className = 'slot-number'; number.textContent = `#${slot.slot_index}`;
+  const itemField = document.createElement('label'); itemField.className = 'item-field';
+  const itemName = document.createElement('span'); itemName.textContent = slot.name_zh;
+  const item = document.createElement('input'); item.value = slot.item_id; item.title = '使用 Palworld 内部道具 ID';
+  itemField.append(itemName, item);
+  const count = document.createElement('input'); count.type = 'number'; count.min = '0'; count.max = '999999'; count.value = slot.count;
+  const save = document.createElement('button'); save.textContent = '保存';
+  save.addEventListener('click', async () => {
+    save.disabled = true; save.textContent = '写入中';
+    try {
+      const body = {category,slot_index:slot.slot_index,item_id:item.value,count:Number(count.value),expected_sha256:activeWorldHash};
+      const response = await fetch(`/api/world/users/${user.player_uid}/inventory?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const data = await response.json(); if (!response.ok) throw new Error(data.detail);
+      activeWorldHash = data.level_sha256; await loadUsers();
+    } catch (error) { alert(error.message); }
+    finally { save.disabled = false; save.textContent = '保存'; }
+  });
+  row.append(number,itemField,count,save); return row;
 }
 
 document.querySelector('#refresh').addEventListener('click', scan);

@@ -12,7 +12,7 @@
     <section class="hero">
       <p class="eyebrow">PALWORLD 1.0 SAVE WORKBENCH</p>
       <h1>先确认存档健康，<br>再安全地修改。</h1>
-      <p>所有分析都在这台 Mac 上完成。当前版本只读，不会覆盖服务器存档。</p>
+      <p>所有分析与修改都在这台 Mac 上完成。每次写入前自动备份，并使用 Palworld 原始数据格式。</p>
     </section>
     <section class="panel">
       <div class="panel-head"><div><h2>服务器世界</h2><p id="root">正在发现 Save 目录…</p></div><button id="refresh">重新扫描</button></div>
@@ -20,7 +20,7 @@
     </section>
     <section id="user-panel" class="panel item-panel hidden">
       <div class="panel-head"><div><h2>当前存档用户</h2><p id="user-summary">选择世界后加载用户</p></div><button id="reload-users">重新读取</button></div>
-      <div id="users" class="user-grid"></div>
+      <div class="user-layout"><nav id="users" class="user-nav"></nav><section id="player-detail" class="player-detail"><div class="empty">从左侧选择用户</div></section></div>
     </section>
     <details class="reference-panel"><summary>内部 ID 中文参考</summary><section class="panel item-panel">
       <div class="panel-head"><div><h2>道具 ID 中文索引</h2><p id="item-summary">正在加载 1.0 道具数据…</p></div></div>
@@ -46,7 +46,8 @@
   <template id="user-template">
     <article class="user-card">
       <div class="user-title"><div><h3 class="user-name"></h3><code class="user-id"></code></div><span class="pal-count"></span></div>
-      <form class="user-form">
+      <div class="detail-tabs"><button data-tab="profile" class="active">基础资料</button><button data-tab="inventory">背包道具</button><button data-tab="pals">拥有的帕鲁</button></div>
+      <form class="user-form tab-pane" data-pane="profile">
         <label>用户昵称<input name="nickname" maxlength="64"></label>
         <label>等级<input name="level" type="number" min="1" max="100"></label>
         <label>经验值<input name="experience" type="number" min="0"></label>
@@ -56,7 +57,8 @@
         <button type="submit" class="save-user">备份并保存</button>
         <span class="save-result"></span>
       </form>
-      <details class="pal-list"><summary>查看该用户的帕鲁</summary><div></div></details>
+      <section class="inventory-list tab-pane hidden" data-pane="inventory"></section>
+      <section class="pal-list tab-pane hidden" data-pane="pals"><div></div></section>
     </article>
   </template>
   <script src="/assets/app.js"></script>
