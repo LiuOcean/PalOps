@@ -28,7 +28,7 @@ def main() -> None:
             "sha256": sha256(level),
             "character_count": result["character_count"],
             "world_property_count": result["world_property_count"],
-            "write_enabled": False,
+            "write_enabled": True,
         }, ensure_ascii=False, indent=2))
     elif args.command == "serve":
         import uvicorn

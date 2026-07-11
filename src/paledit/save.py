@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from .models import SaveFileInfo, WorldInfo
 
 MAGIC_OFFSET = 8
+PLAYER_SAVE_NAME = re.compile(r"^[0-9A-Fa-f]{32}\.sav$")
 
 
 class InvalidSaveError(ValueError):
@@ -59,11 +61,13 @@ def discover_worlds(save_root: Path) -> list[WorldInfo]:
             WorldInfo(
                 world_id=world_dir.name,
                 path=str(world_dir),
-                player_files=len(list(players_dir.glob("*.sav"))) if players_dir.is_dir() else 0,
+                player_files=(
+                    sum(1 for path in players_dir.glob("*.sav") if PLAYER_SAVE_NAME.fullmatch(path.name))
+                    if players_dir.is_dir() else 0
+                ),
                 backup_sets=len([p for p in backups_dir.iterdir() if p.is_dir()]) if backups_dir.is_dir() else 0,
                 level=inspect_save(level_path),
                 level_meta=inspect_save(meta_path) if meta_path.is_file() else None,
             )
         )
     return worlds
-
