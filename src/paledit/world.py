@@ -46,14 +46,20 @@ def parameter_of(entity: dict[str, Any]) -> dict[str, Any]:
     return entity["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"]
 
 
-def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
+def load_player_gvas(world_path: Path, player_uid: str):
     from palworld_save_tools.gvas import GvasFile
     from palworld_save_tools.palsav import decompress_sav_to_gvas
     from palworld_save_tools.paltypes import PALWORLD_TYPE_HINTS
 
     filename = f"{player_uid.split('-')[0].upper()}000000000000000000000000.sav"
-    raw, _ = decompress_sav_to_gvas((world_path / "Players" / filename).read_bytes())
-    save = GvasFile.read(raw, PALWORLD_TYPE_HINTS, {}).properties["SaveData"]["value"]
+    player_path = world_path / "Players" / filename
+    raw, save_type = decompress_sav_to_gvas(player_path.read_bytes())
+    return player_path, GvasFile.read(raw, PALWORLD_TYPE_HINTS, {}), save_type
+
+
+def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
+    _, gvas, _ = load_player_gvas(world_path, player_uid)
+    save = gvas.properties["SaveData"]["value"]
     info = save["InventoryInfo"]["value"]
     labels = {
         "CommonContainerId": "背包",
@@ -63,6 +69,17 @@ def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
         "FoodEquipContainerId": "食物装备",
     }
     return {label: guid_of(info[key]["value"]["ID"]) for key, label in labels.items() if key in info}
+
+
+def player_file_data(world_path: Path, player_uid: str) -> dict[str, object]:
+    player_path, gvas, _ = load_player_gvas(world_path, player_uid)
+    save = gvas.properties["SaveData"]["value"]
+    return {
+        "player_file": str(player_path.relative_to(world_path)),
+        "player_file_sha256": sha256(player_path),
+        "technology_points": int(value_of(save.get("TechnologyPoint"), 0)),
+        "boss_technology_points": int(value_of(save.get("bossTechnologyPoint"), 0)),
+    }
 
 
 def inventory_containers(gvas: Any) -> dict[str, list[dict[str, object]]]:
@@ -154,6 +171,7 @@ def list_users(world_path: Path) -> dict[str, object]:
         user["pal_count"] = len(user["pals"])
         try:
             ids = player_inventory_ids(world_path, uid)
+            user.update(player_file_data(world_path, uid))
             user["inventories"] = {label: containers.get(container_id, []) for label, container_id in ids.items()}
             user["inventory_container_ids"] = ids
         except (FileNotFoundError, KeyError):
@@ -176,13 +194,27 @@ def _write_world(world_path: Path, gvas: Any) -> Path:
     return backup_root
 
 
-def update_user(world_path: Path, player_uid: str, changes: dict[str, object], expected_sha256: str) -> dict[str, object]:
+def _write_player(player_path: Path, gvas: Any) -> None:
+    from palworld_save_tools.palsav import compress_gvas_to_sav
+
+    raw = copy.deepcopy(gvas).write({})
+    output = compress_gvas_to_sav(raw, 0x32, True)
+    temp_path = player_path.with_suffix(".sav.paledit.tmp")
+    temp_path.write_bytes(output)
+    raw_check, _ = __import__("palworld_save_tools.palsav", fromlist=["decompress_sav_to_gvas"]).decompress_sav_to_gvas(output)
+    from palworld_save_tools.gvas import GvasFile
+    from palworld_save_tools.paltypes import PALWORLD_TYPE_HINTS
+    GvasFile.read(raw_check, PALWORLD_TYPE_HINTS, {})
+    os.replace(temp_path, player_path)
+
+
+def update_user(world_path: Path, player_uid: str, changes: dict[str, object], expected_sha256: str, expected_player_sha256: str | None = None) -> dict[str, object]:
     world_path = world_path.expanduser().resolve()
     level_path = world_path / "Level.sav"
     current_hash = sha256(level_path)
     if current_hash != expected_sha256:
         raise ValueError("Level.sav 已变化，请重新加载后再保存")
-    allowed = {"nickname", "level", "experience", "unused_status_points", "satiety"}
+    allowed = {"nickname", "level", "experience", "unused_status_points", "satiety", "technology_points"}
     unknown = set(changes) - allowed
     if unknown:
         raise ValueError(f"不支持修改字段：{', '.join(sorted(unknown))}")
@@ -202,12 +234,14 @@ def update_user(world_path: Path, player_uid: str, changes: dict[str, object], e
         "experience": lambda value: max(0, min(2**63 - 1, int(value))),
         "unused_status_points": lambda value: max(0, min(65535, int(value))),
         "satiety": lambda value: max(0.0, min(100.0, float(value))),
+        "technology_points": lambda value: max(0, min(9999, int(value))),
     }
     pal_fields = {
         "nickname": "NickName", "level": "Level", "experience": "Exp",
         "unused_status_points": "UnusedStatusPoint", "satiety": "FullStomach",
     }
-    for field, raw_value in changes.items():
+    world_changes = {field: value for field, value in changes.items() if field != "technology_points"}
+    for field, raw_value in world_changes.items():
         prop_name = pal_fields[field]
         if prop_name not in target:
             raise ValueError(f"当前用户没有可安全修改的字段：{field}")
@@ -215,7 +249,25 @@ def update_user(world_path: Path, player_uid: str, changes: dict[str, object], e
         if field == "nickname" and "FilteredNickName" in target:
             set_value(target["FilteredNickName"], value_of(target[prop_name]))
 
-    backup_root = _write_world(world_path, gvas)
+    backup_root = world_path / "PalEdit-Backup" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    shutil.copytree(world_path, backup_root, ignore=shutil.ignore_patterns("backup", "PalEdit-Backup"))
+    if world_changes:
+        raw = copy.deepcopy(gvas).write(character_custom_properties())
+        from palworld_save_tools.palsav import compress_gvas_to_sav
+        output = compress_gvas_to_sav(raw, 0x32, True)
+        temp_path = level_path.with_suffix(".sav.paledit.tmp")
+        temp_path.write_bytes(output)
+        open_world(temp_path)
+        os.replace(temp_path, level_path)
+    if "technology_points" in changes:
+        player_path, player_gvas, _ = load_player_gvas(world_path, player_uid)
+        if expected_player_sha256 and sha256(player_path) != expected_player_sha256:
+            raise ValueError("玩家文件已变化，请重新加载后再保存")
+        player_save = player_gvas.properties["SaveData"]["value"]
+        if "TechnologyPoint" not in player_save:
+            raise ValueError("当前玩家文件没有 TechnologyPoint 字段")
+        set_value(player_save["TechnologyPoint"], validators["technology_points"](changes["technology_points"]))
+        _write_player(player_path, player_gvas)
     result = list_users(world_path)
     result["backup_path"] = str(backup_root)
     return result

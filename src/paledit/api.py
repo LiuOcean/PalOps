@@ -86,7 +86,8 @@ def users(path: str) -> dict[str, object]:
 def patch_user(player_uid: str, path: str, payload: dict = Body(...)) -> dict[str, object]:
     try:
         expected = str(payload.pop("expected_sha256"))
-        return update_user(Path(path), player_uid, payload, expected)
+        expected_player = payload.pop("expected_player_sha256", None)
+        return update_user(Path(path), player_uid, payload, expected, expected_player)
     except (KeyError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 

@@ -98,7 +98,7 @@ function renderUser(user) {
   card.querySelector('.user-id').textContent = user.player_uid;
   card.querySelector('.pal-count').textContent = `${user.pal_count} 只帕鲁`;
   const form = card.querySelector('form');
-  for (const field of ['nickname','level','experience','unused_status_points','satiety']) form.elements[field].value = user[field];
+  for (const field of ['nickname','level','experience','unused_status_points','satiety','technology_points']) form.elements[field].value = user[field] ?? 0;
   card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
   const palBox = card.querySelector('.pal-list div');
   for (const pal of user.pals) {
@@ -124,8 +124,8 @@ function renderUser(user) {
     event.preventDefault();
     const button = form.querySelector('.save-user'); const status = form.querySelector('.save-result');
     button.disabled = true; status.textContent = '正在备份、写入并重新解析…';
-    const body = {expected_sha256: activeWorldHash};
-    for (const field of ['nickname','level','experience','unused_status_points','satiety']) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
+    const body = {expected_sha256: activeWorldHash, expected_player_sha256:user.player_file_sha256};
+    for (const field of ['nickname','level','experience','unused_status_points','satiety','technology_points']) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
     try {
       const response = await fetch(`/api/world/users/${user.player_uid}?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail);

@@ -39,3 +39,13 @@ def test_inventory_count_update_round_trips_in_copy(tmp_path: Path) -> None:
     changed_user = next(row for row in after["users"] if row["player_uid"] == user["player_uid"])
     changed_slot = next(row for row in changed_user["inventories"]["背包"] if row["slot_index"] == slot["slot_index"])
     assert changed_slot["count"] == slot["count"] + 1
+
+
+def test_technology_points_can_be_set_to_9999(tmp_path: Path) -> None:
+    copied = tmp_path / "world"
+    shutil.copytree(WORLD, copied, ignore=shutil.ignore_patterns("backup", "PalEdit-Backup"))
+    before = list_users(copied)
+    user = before["users"][0]
+    after = update_user(copied, user["player_uid"], {"technology_points": 9999}, before["level_sha256"], user["player_file_sha256"])
+    changed = next(row for row in after["users"] if row["player_uid"] == user["player_uid"])
+    assert changed["technology_points"] == 9999
