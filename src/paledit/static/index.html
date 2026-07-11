@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PalEdit</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header><div><span class="logo">P</span><strong>PalEdit</strong></div><span class="badge">macOS · 本地模式</span></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">PALWORLD 1.0 SAVE WORKBENCH</p>
+      <h1>先确认存档健康，<br>再安全地修改。</h1>
+      <p>所有分析都在这台 Mac 上完成。当前版本只读，不会覆盖服务器存档。</p>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><h2>服务器世界</h2><p id="root">正在发现 Save 目录…</p></div><button id="refresh">重新扫描</button></div>
+      <div id="worlds" class="worlds"><div class="empty">正在读取存档头…</div></div>
+    </section>
+    <section class="panel item-panel">
+      <div class="panel-head"><div><h2>道具 ID 中文索引</h2><p id="item-summary">正在加载 1.0 道具数据…</p></div></div>
+      <label class="search"><span>搜索</span><input id="item-query" type="search" placeholder="输入中文名称或内部 ID，例如：帕鲁球 / PalSphere"></label>
+      <div id="item-results" class="item-results"></div>
+    </section>
+  </main>
+  <template id="world-template">
+    <article class="world-card">
+      <div class="world-main"><span class="status"></span><div><h3></h3><p class="meta"></p></div></div>
+      <div class="facts"><span class="format"></span><span class="players"></span><span class="backups"></span></div>
+      <div class="actions"><button class="inspect">执行 1.0 深度诊断</button><span class="result">尚未诊断</span></div>
+    </article>
+  </template>
+  <template id="item-template">
+    <button class="item-row"><span class="item-name"></span><code class="item-id"></code><span class="localization"></span></button>
+  </template>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paledit"
+version = "0.1.0"
+description = "A safety-first Palworld 1.0 save editor for macOS"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn>=0.35,<1",
+  "pyooz==0.0.8",
+  "palworld-save-tools @ git+https://github.com/KrisCris/palworld-save-tools.git@480f1f631295e32bd9c9fa5be689eb335bf912a7",
+]
+
+[project.optional-dependencies]
+dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
+
+[project.scripts]
+paledit = "paledit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paledit"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

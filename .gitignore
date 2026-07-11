@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+backups/
+work/
+dist/
+build/
+*.egg-info/
+# Real server data. Never commit saves or generated server configuration.
+Save/
+save/
