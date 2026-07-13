@@ -1,49 +1,52 @@
-# PalEdit 运维界面 Design QA
+# PalEdit 服务器主工作台 Design QA
 
-- Source visual truth: `local-artifacts/generated-images/00000000-0000-0000-0000-000000000101/exec-00000000-0000-0000-0000-000000000105.png`
-- Implementation screenshot: `~/Projects/Tools/Game/PalEdit/.artifacts/ui/operations-final-default.jpg`
-- Full target-size implementation evidence: `~/Projects/Tools/Game/PalEdit/.artifacts/ui/operations-1440x1024.jpg`
-- Combined comparison: `~/Projects/Tools/Game/PalEdit/.artifacts/ui/design-qa-comparison-final.jpg`
-- Viewport: target 1440 x 1024; final focused browser evidence 1280 x 720
-- State: 运维 / 常用操作；palworld-server 在线；3 名玩家在线；RCON 已连接；所有确认框未勾选
+- Source visual truth: `local-artifacts/generated-images/00000000-0000-0000-0000-000000000102/exec-00000000-0000-0000-0000-000000000104.png`
+- Implementation screenshot: `local-artifacts/visualizations/2026/07/13/00000000-0000-0000-0000-000000000102/paledit-design-qa/implementation-final.png`
+- Combined comparison: `local-artifacts/visualizations/2026/07/13/00000000-0000-0000-0000-000000000102/paledit-design-qa/comparison-v2.png`
+- Responsive evidence: `local-artifacts/visualizations/2026/07/13/00000000-0000-0000-0000-000000000102/paledit-design-qa/implementation-tablet-900-v2.png`
+- Viewport: 1440 x 1024; responsive check 900 x 900
+- State: 世界数据 / 储物箱；palworld-server 在线；世界诊断完成；默认选中“物资箱-Raid石板”
 
 ## Full-view comparison evidence
 
-方案 3 与实现采用相同的顶部导航、主操作区加右侧上下文栏、深色森林绿表面、酸性荧光绿主动作和分步安全重启结构。实现保留了更明确的“表单生成、无需输入指令或玩家 ID”产品约束，并在 1440 x 1024 证据中保持主动作、右栏状态和常用操作同屏。
+合并对比中，最终实现保留了方案 3 的服务器主任务侧栏、世界数据标题与同步主动作、数据源/资源列表/详情三栏结构、深色森林绿表面和荧光绿选中态。主画面不再纵向堆叠世界、箱子和玩家，也不会把 58 个容器全部展开成卡片。
+
+实现依据当前产品能力做了两项有意约束：箱子 API 仍为只读，因此详情明确显示“只读”，没有伪造编辑动作；项目暂无备份列表 API，因此没有加入不可工作的“备份”页签。两项差异不影响当前核心任务。
 
 ## Focused region comparison evidence
 
-最终 1280 x 720 浏览器截图用于检查顶部导航、重启步骤、右栏状态和真实图标清晰度。Phosphor 图标字体替换了首轮的字母占位与纯数字步骤表达；图标文件和许可证均随项目本地提供，不依赖外部 CDN。无需额外局部截图，因为关键表单、图标与右栏文字在该截图中均可读。
+同一张合并对比图可清晰检查三栏比例、资源行、选中态、道具图标、数量列和技术信息降级方式。最终实现使用现有真实道具图标和本地 Phosphor 图标字体，没有用 CSS 图形或占位资产替代。技术 GUID 与对象类型收进“查看技术信息”，本地路径收进“本地快照位置”。
 
 ## Required fidelity surfaces
 
-- Fonts and typography: 使用系统 SF Pro / PingFang SC 字体栈；标题、正文和小型状态文字层级与方案一致，无异常换行或截断。
-- Spacing and layout rhythm: 方案的宽主区、窄上下文栏和紧凑行式步骤得到保留；响应式断点在 980px 和 700px 下重排。
-- Colors and visual tokens: 近黑、深森林绿、酸性绿、琥珀与危险红均由集中 CSS token 管理，状态对比明确。
-- Image quality and asset fidelity: 界面不需要位图内容；操作图标使用本地 Phosphor 2.1.2 字体资产，品牌 P 标记沿用项目现有视觉。
-- Copy and content: 中文运维文案明确区分安全重启、保存、广播、玩家管理和高级白名单指令，并明确不允许手写指令与 ID。
+- Fonts and typography: 使用系统 SF Pro / PingFang SC 字体栈；标题、导航、资源名、元数据与数量列层级清晰。关键交互文字保持 11–14px，小于 11px 的内容仅用于技术元数据。
+- Spacing and layout rhythm: 1440px 下采用固定任务侧栏、窄数据源栏、中等资源列表和宽详情区；行式分隔替代卡片网格。900px 下导航压缩为单行短标签，三栏保持可横向容纳且无重叠。
+- Colors and visual tokens: 近黑、森林绿、荧光绿、危险红和琥珀色由 CSS token 集中管理；没有使用装饰渐变。
+- Image quality and asset fidelity: 道具使用后端提供的真实图标；标准 UI 图标使用本地 Phosphor 字体；品牌 P 标记沿用既有资产语言。
+- Copy and content: 导航按服务器主心智模型改为总览、在线与权限、世界数据、服务器规则、维护记录；同步、只读、重新诊断和安全写入文案与真实行为一致。
 
 ## Interaction and runtime evidence
 
-- 主导航和三个运维 tab 可切换。
-- 玩家操作、玩家目标、指令、广播模板和倒计时均为下拉菜单。
-- 玩家下拉由实时 REST 玩家列表生成，仅显示昵称与等级。
-- 未勾选确认框时，安全重启、玩家操作和高级指令按钮均保持 disabled。
+- 主导航、世界数据资源页签、储物箱选择、玩家选择和玩家详情页签均可工作。
+- 打开世界后可在 58 个容器间切换，右栏显示真实道具、图标与数量。
+- 玩家页签默认选择项目约定 UID `00000000-0000-0000-0000-000000000000`，而不是猜测首个玩家。
+- 服务器规则页可从主导航打开并成功加载。
 - 浏览器控制台错误：0。
-- 自动化测试：19 passed。
-- 未点击任何执行按钮；未发送保存、广播、踢出、封禁、关服或重启命令。
+- 静态检查：JavaScript syntax、HTML parser、`git diff --check` 均通过。
+- 测试：30 passed，2 failed。失败来自当前 Save 已有 15 个玩家，而用户已有测试改动仍断言 11 个；与本次 UI 修改无关，未改动这些测试。
+- 未执行任何保存、广播、踢出、封禁、关服、重启或远端同步操作。
 
 ## Comparison history
 
-1. P1: 初始实现将容器状态与玩家列表放入同一个 `Promise.all` 错误边界，空响应的 `ShowPlayers` 超时会把健康服务器错误显示为不可用。
-   - Fix: 在线玩家改用容器内官方 REST API 只读端点；RCON 密码仍只在 palworld-server 容器环境中展开，不返回 PalEdit。
-   - Post-fix evidence: 浏览器显示服务器“在线”、RCON“已连接”和 3 名在线玩家。
-2. P2: 首轮实现使用字母标记代替方案中的操作图标。
-   - Fix: 本地引入 Phosphor 2.1.2 regular 图标字体，为安全重启、广播、保存、倒计时和电源步骤提供一致图标。
-   - Post-fix evidence: 最终默认窗口截图与合并对比图显示真实图标并保持原有布局。
-3. P2: 1280 x 720 首次截图裁掉下方主动作，无法代表目标画布。
-   - Fix: 补充 1440 x 1024 同状态全视图，并将最终 1280 x 720 截图只作为图标与首屏聚焦证据。
-   - Post-fix evidence: `operations-1440x1024.jpg` 显示确认框、主动作、操作结果与右栏完整区域。
+1. P2: 第一版在数据源栏直接展示完整本地路径，仍然形成技术噪声。
+   - Fix: 将路径收进“本地快照位置”折叠区，并将世界按钮在成功后改为“重新诊断”。
+   - Post-fix evidence: `comparison-v2.png` 的实现侧只保留人类可读的数据源与世界摘要。
+2. P2: 900px 首次响应式检查中，玩家列表缺少资源行样式，顶部导航发生不必要换行。
+   - Fix: 玩家列表复用 `user-nav` 行式样式；900px 导航改为紧凑单行并隐藏低优先级说明。
+   - Post-fix evidence: `implementation-tablet-900-v2.png` 无重叠、无破碎列表或导航换行。
+3. P2: 默认玩家最初取接口第一条记录，可能选中错误的同名角色。
+   - Fix: 首次进入玩家资源时优先选择项目约定的服务器主 UID。
+   - Post-fix evidence: 浏览器读回的默认详情 UID 为 `00000000-0000-0000-0000-000000000000`。
 
 ## Findings
 
@@ -51,6 +54,6 @@
 
 ## Follow-up polish
 
-- P3: 后续可为操作日志增加持久化，但这不影响当前运维主流程和安全边界。
+- P3: 若后续增加箱子写入或备份列表 API，可直接在当前详情栏和资源页签中扩展，无需再次改变信息架构。
 
 final result: passed

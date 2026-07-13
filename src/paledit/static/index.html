@@ -8,157 +8,112 @@
   <link rel="stylesheet" href="/assets/icons/phosphor.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span></div>
-    <nav class="main-nav" aria-label="主导航">
-      <button data-view="overview">概览</button>
-      <button data-view="operations" class="active">运维</button>
-      <button data-view="players">玩家</button>
-      <button data-view="config">配置</button>
-      <button data-view="saves">存档</button>
-      <button data-view="data">数据</button>
-    </nav>
-    <span class="badge">macOS · 本地模式</span>
-  </header>
+  <div class="app-frame">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span></div>
+      <nav class="main-nav" aria-label="主导航">
+        <p class="nav-label">服务器</p>
+        <button data-view="overview"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与运行概况</small></span></button>
+        <button data-view="players"><i class="ph ph-user-focus" aria-hidden="true"></i><span><strong>在线与权限</strong><small>玩家身份与管理</small></span></button>
+        <button data-view="saves" class="active"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界数据</strong><small>玩家、储物箱与存档</small></span></button>
+        <button data-view="config"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>服务器规则</strong><small>游戏规则与参数</small></span></button>
+        <button data-view="operations"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span><strong>维护记录</strong><small>重启、广播与日志</small></span></button>
+        <p class="nav-label tools-label">工具</p>
+        <button data-view="data"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>资料索引</strong><small>道具与帕鲁 ID</small></span></button>
+      </nav>
+      <section class="server-card" aria-label="服务器状态">
+        <div class="server-card-head"><strong>palworld-server</strong><span id="server-state" class="status-pill loading">读取中</span></div>
+        <p>Palworld Dedicated Server</p>
+        <dl>
+          <div><dt>健康</dt><dd id="server-health">—</dd></div>
+          <div><dt>在线</dt><dd id="online-count">—</dd></div>
+          <div><dt>重启策略</dt><dd id="restart-policy">—</dd></div>
+        </dl>
+        <button data-jump="operations" class="sidebar-action"><i class="ph ph-power" aria-hidden="true"></i> 安全维护</button>
+      </section>
+      <p class="local-note"><i class="ph ph-lock-key" aria-hidden="true"></i> 本地连接 · 凭据不离开 palworld-server</p>
+    </aside>
 
-  <main class="app-shell">
-    <section class="app-view" data-page="operations">
-      <div class="page-heading">
-        <div><p class="eyebrow">palworld-server PALWORLD CONTROL</p><h1>服务器运维</h1><p>所有命令均由表单生成，无需输入指令或玩家 ID。</p></div>
-        <span class="auto-refresh-note"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 每 15 秒自动刷新</span>
-      </div>
+    <main class="app-shell">
+      <section class="app-view" data-page="saves">
+        <header class="workspace-header">
+          <div><p class="eyebrow">PALWORLD 1.0</p><h1><i class="ph ph-database" aria-hidden="true"></i> 世界数据</h1><p>从服务器同步后，浏览储物箱，并安全修改玩家数据。</p></div>
+          <div class="freshness"><span><i class="ph ph-circle" aria-hidden="true"></i> 数据来源：palworld-server</span><button id="pull-save" class="primary"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 从服务器同步</button></div>
+        </header>
+        <p id="pull-result" class="sync-result" aria-live="polite"></p>
 
-      <div class="ops-layout">
-        <section class="operation-workspace">
-          <div class="segmented" role="tablist">
-            <button class="active" data-operation-tab="common">常用操作</button>
-            <button data-operation-tab="player">玩家管理</button>
-            <button data-operation-tab="advanced">高级指令</button>
-          </div>
+        <section class="world-workspace">
+          <aside class="source-column">
+            <div class="column-heading"><span>数据源</span><button id="refresh" class="icon-button" title="重新扫描本地存档"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">重新扫描</span></button></div>
+            <div class="source-status"><span class="source-dot"></span><div><strong>palworld-server 世界数据</strong><small>同步后在本机安全编辑</small></div></div>
+            <details class="source-tech"><summary>本地快照位置</summary><p id="root">正在发现 Save 目录…</p></details>
+            <div id="worlds" class="worlds"><div class="empty">正在读取存档头…</div></div>
+            <div class="source-help"><i class="ph ph-shield-check" aria-hidden="true"></i><p>所有写入都会先备份并校验原始哈希。</p></div>
+          </aside>
 
-          <div class="operation-pane" data-operation-pane="common">
-            <div class="operation-title"><span class="step-number"><i class="ph ph-shield-check" aria-hidden="true"></i></span><div><h2>安全重启</h2><p>先保存世界，再排定关服；容器由现有重启策略自动拉起。</p></div></div>
-            <ol class="restart-flow">
-              <li class="active"><span>1</span><i class="ph ph-megaphone" aria-hidden="true"></i><div><strong>广播通知</strong><small>向所有在线玩家说明维护时间。</small></div></li>
-              <li><span>2</span><i class="ph ph-floppy-disk" aria-hidden="true"></i><div><strong>保存世界</strong><small>通过 RCON 写入当前世界进度。</small></div></li>
-              <li><span>3</span><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong>等待玩家退出</strong><small>使用固定倒计时，避免误输数值。</small></div></li>
-              <li><span>4</span><i class="ph ph-power" aria-hidden="true"></i><div><strong>重启服务</strong><small>关服后由 restart policy 自动恢复。</small></div></li>
-            </ol>
-            <div class="form-grid">
-              <label>广播模板
-                <select id="restart-message">
-                  <option value="服务器将在 5 分钟后重启，请尽快返回安全区域。">5 分钟维护提醒</option>
-                  <option value="服务器将在 2 分钟后重启，请保存进度并尽快退出。">2 分钟紧急维护</option>
-                  <option value="服务器将在 1 分钟后重启，请立即退出游戏。">1 分钟最后提醒</option>
-                </select>
-              </label>
-              <label>倒计时
-                <select id="restart-seconds">
-                  <option value="300">5 分钟</option>
-                  <option value="120">2 分钟</option>
-                  <option value="60">1 分钟</option>
-                  <option value="30">30 秒</option>
-                </select>
-              </label>
+          <section class="resource-column">
+            <div class="resource-tabs" role="tablist" aria-label="世界资源类型">
+              <button class="active" data-resource-tab="containers"><i class="ph ph-archive" aria-hidden="true"></i> 储物箱</button>
+              <button data-resource-tab="users"><i class="ph ph-users" aria-hidden="true"></i> 玩家</button>
             </div>
-            <label class="confirm-row"><input id="restart-confirm" type="checkbox"><span>我确认已检查在线玩家，并理解服务器会在倒计时结束后关服。</span></label>
-            <button id="safe-restart" class="primary wide" disabled>执行安全重启</button>
-          </div>
+            <section id="container-panel" class="resource-pane hidden" data-resource-pane="containers">
+              <div class="resource-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索储物箱</span><input id="container-query" type="search" placeholder="搜索储物箱或道具"></label><button id="reload-containers" class="icon-button" title="重新读取储物箱"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">重新读取</span></button></div>
+              <p id="container-summary" class="resource-summary">打开世界后读取储物箱</p>
+              <div id="containers" class="resource-list"></div>
+            </section>
+            <section id="user-panel" class="resource-pane hidden" data-resource-pane="users">
+              <div class="resource-toolbar compact"><p id="user-summary" class="resource-summary">打开世界后加载玩家</p><button id="reload-users" class="icon-button" title="重新读取玩家"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">重新读取</span></button></div>
+              <nav id="users" class="resource-list user-nav" aria-label="存档玩家"></nav>
+            </section>
+            <div id="resource-empty" class="resource-empty"><i class="ph ph-folder-open" aria-hidden="true"></i><strong>先打开服务器世界</strong><p>完成只读诊断后，这里会显示玩家和储物箱。</p></div>
+          </section>
 
-          <div class="operation-pane hidden" data-operation-pane="player">
-            <div class="operation-title"><span class="step-number"><i class="ph ph-user-focus" aria-hidden="true"></i></span><div><h2>玩家管理</h2><p>玩家 ID 由在线列表自动映射，不支持手动输入。</p></div></div>
-            <div class="form-grid single">
-              <label>选择操作
-                <select id="player-action"><option value="kick">踢出玩家</option><option value="ban">封禁玩家</option></select>
-              </label>
-              <label>选择在线玩家
-                <select id="player-select"><option value="">正在读取在线玩家…</option></select>
-              </label>
-            </div>
-            <label class="confirm-row"><input id="player-confirm" type="checkbox"><span>我确认要对所选玩家执行此操作。</span></label>
-            <button id="run-player-action" class="danger wide" disabled>执行玩家操作</button>
-          </div>
-
-          <div class="operation-pane hidden" data-operation-pane="advanced">
-            <div class="operation-title"><span class="step-number"><i class="ph ph-terminal-window" aria-hidden="true"></i></span><div><h2>高级指令</h2><p>仅开放官方白名单指令，命令名称与参数均由界面生成。</p></div></div>
-            <div class="form-grid single">
-              <label>指令
-                <select id="advanced-action">
-                  <option value="save">保存世界</option>
-                  <option value="broadcast">发送广播</option>
-                  <option value="shutdown">计划关服</option>
-                </select>
-              </label>
-              <label id="advanced-message-wrap" class="hidden">广播模板
-                <select id="advanced-message">
-                  <option value="服务器将在 5 分钟后维护，请尽快返回安全区域。">5 分钟维护提醒</option>
-                  <option value="服务器维护已经完成，欢迎回来。">维护完成通知</option>
-                  <option value="请注意：服务器即将保存世界，可能短暂卡顿。">保存世界提醒</option>
-                </select>
-              </label>
-              <label id="advanced-seconds-wrap" class="hidden">倒计时
-                <select id="advanced-seconds"><option value="300">5 分钟</option><option value="120">2 分钟</option><option value="60">1 分钟</option><option value="30">30 秒</option></select>
-              </label>
-            </div>
-            <label class="confirm-row"><input id="advanced-confirm" type="checkbox"><span>我确认执行所选官方指令。</span></label>
-            <button id="run-advanced-action" class="primary wide" disabled>执行所选指令</button>
-          </div>
-          <p id="operation-result" class="operation-result" aria-live="polite">等待操作</p>
-
-          <section class="quick-actions">
-            <h2>其他常用操作</h2>
-            <button data-quick-tab="advanced" data-quick-action="save"><span><strong>保存世界</strong><small>立即保存当前世界进度</small></span><b>选择</b></button>
-            <button data-quick-tab="advanced" data-quick-action="broadcast"><span><strong>发送广播</strong><small>使用预设消息通知在线玩家</small></span><b>选择</b></button>
-            <button data-quick-tab="player" data-quick-action="kick"><span><strong>踢出玩家</strong><small>从在线玩家下拉列表中选择</small></span><b>选择</b></button>
-            <button data-quick-tab="player" data-quick-action="ban"><span><strong>封禁玩家</strong><small>仅允许选择当前在线玩家</small></span><b>选择</b></button>
+          <section class="detail-column" aria-live="polite">
+            <div id="container-detail" class="container-detail"><div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div></div>
+            <section id="player-detail" class="player-detail hidden"><div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>选择一名玩家</strong><p>基础资料、背包和帕鲁会在这里展开。</p></div></section>
           </section>
         </section>
-
-        <aside class="server-context">
-          <section><div class="aside-heading"><h2>服务状态</h2><span id="server-state" class="status-pill loading">读取中</span></div><dl><div><dt>主机</dt><dd>palworld-server</dd></div><div><dt>容器</dt><dd>palworld-server</dd></div><div><dt>健康状态</dt><dd id="server-health">—</dd></div><div><dt>重启策略</dt><dd id="restart-policy">—</dd></div></dl></section>
-          <section><div class="aside-heading"><h2>当前玩家</h2><span id="online-count">—</span></div><div id="online-players" class="online-players"><p>正在读取在线列表…</p></div></section>
-          <section><div class="aside-heading"><h2>RCON 连接</h2><span id="rcon-state" class="connection-state">检查中</span></div><p class="aside-copy">地址与凭据保留在 palworld-server 容器内，PalEdit 不读取或展示密码。</p></section>
-          <section><h2>操作日志</h2><div id="operation-log" class="operation-log"><p>本次会话尚无写操作</p></div></section>
-        </aside>
-      </div>
-    </section>
-
-    <section class="app-view hidden" data-page="overview"><div class="page-heading"><div><p class="eyebrow">PALWORLD 1.0</p><h1>服务器概览</h1><p>运维、玩家和存档工具集中在一个本地控制台。</p></div></div><div class="overview-callout"><h2>palworld-server Palworld</h2><p>进入“运维”执行安全操作，进入“存档”拉取并编辑世界数据。</p><button data-jump="operations" class="primary">进入服务器运维</button></div></section>
-    <section class="app-view hidden" data-page="players"><div class="page-heading"><div><p class="eyebrow">ONLINE PLAYERS</p><h1>玩家</h1><p>查看在线身份，并快捷复制游戏内 GM 传送指令。</p></div><button data-jump="operations" class="primary">打开玩家管理</button></div><p id="player-copy-result" class="copy-result" aria-live="polite"></p><div id="players-page-list" class="standalone-list">正在读取在线玩家…</div></section>
-    <section class="app-view hidden" data-page="config">
-      <div class="page-heading"><div><p class="eyebrow">SERVER CONFIGURATION</p><h1>服务器配置</h1><p>查看与编辑 palworld-server 的持久化 Compose 配置；密码及凭据始终隐藏。</p></div><div class="panel-actions"><button id="export-config" class="secondary" disabled>导出 JSON</button><button id="reload-config" class="secondary">刷新配置</button></div></div>
-      <section class="panel config-panel">
-        <div class="config-toolbar"><div><h2>游戏与服务器设置</h2><p id="config-source">正在读取远端配置…</p></div><label class="config-search"><span>筛选</span><input id="config-query" type="search" placeholder="搜索实际作用，例如：经验、孵化、备份"></label></div>
-        <div id="config-settings" class="config-settings"><div class="empty">正在从 palworld-server 读取…</div></div>
-        <div class="config-footer"><p id="config-result" class="config-result" aria-live="polite">修改只会在保存后写入服务器；重启前不会应用到运行实例。</p><button id="save-config" class="primary" disabled>备份并保存到服务器</button></div>
       </section>
-      <section class="panel config-restart-panel">
-        <div><p class="eyebrow">APPLY CHANGES</p><h2>应用配置并重启</h2><p>执行前先通过 RCON 保存世界，再重启容器并等待健康检查恢复。</p></div>
-        <div class="restart-confirmation"><label class="confirm-row"><input id="config-restart-confirm" type="checkbox"><span>第一次确认：我已保存配置并检查在线玩家，理解重启会暂时中断连接。</span></label><button id="config-restart" class="danger" disabled>重启服务器</button></div>
+
+      <section class="app-view hidden" data-page="overview">
+        <header class="workspace-header"><div><p class="eyebrow">palworld-server CONTROL</p><h1>服务器总览</h1><p>先判断是否需要介入，再进入具体工作区。</p></div><span class="auto-refresh-note"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 每 15 秒刷新</span></header>
+        <section class="overview-hero"><div><span class="health-icon"><i class="ph ph-shield-check" aria-hidden="true"></i></span><p class="eyebrow">当前状态</p><h2>服务器连接正常</h2><p>运维接口与玩家列表均可访问。日常无需操作。</p></div><button data-jump="operations" class="primary">进入安全维护 <i class="ph ph-arrow-right" aria-hidden="true"></i></button></section>
+        <div class="overview-grid"><button data-jump="players"><i class="ph ph-users" aria-hidden="true"></i><span><strong>在线与权限</strong><small>查看玩家身份与 GM 指令</small></span><i class="ph ph-caret-right" aria-hidden="true"></i></button><button data-jump="saves"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界数据</strong><small>同步、检查并编辑存档</small></span><i class="ph ph-caret-right" aria-hidden="true"></i></button><button data-jump="config"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>服务器规则</strong><small>调整玩法与维护参数</small></span><i class="ph ph-caret-right" aria-hidden="true"></i></button></div>
       </section>
-    </section>
-    <section class="app-view hidden" data-page="saves">
-      <div class="page-heading"><div><p class="eyebrow">SAVE WORKBENCH</p><h1>存档</h1><p>拉取、诊断并安全修改 Palworld 1.0 世界数据。</p></div></div>
-      <section class="panel"><div class="panel-head"><div><h2>服务器世界</h2><p id="root">正在发现 Save 目录…</p></div><div class="panel-actions"><button id="pull-save" class="primary">从 palworld-server 更新数据</button><button id="refresh">重新扫描</button></div></div><p id="pull-result" class="sync-result" aria-live="polite"></p><div id="worlds" class="worlds"><div class="empty">正在读取存档头…</div></div></section>
-      <section id="container-panel" class="panel item-panel hidden"><div class="panel-head"><div><h2>箱子与物品容器</h2><p id="container-summary">选择世界后读取箱子</p></div><button id="reload-containers">重新读取</button></div><label class="search"><span>筛选</span><input id="container-query" type="search" placeholder="输入标签、箱子类型、容器 GUID 或道具名称"></label><div id="containers" class="container-grid"></div></section>
-      <section id="user-panel" class="panel item-panel hidden"><div class="panel-head"><div><h2>当前存档用户</h2><p id="user-summary">选择世界后加载用户</p></div><button id="reload-users">重新读取</button></div><div class="user-layout"><nav id="users" class="user-nav"></nav><section id="player-detail" class="player-detail"><div class="empty">从左侧选择用户</div></section></div></section>
-    </section>
-    <section class="app-view hidden" data-page="data"><div class="page-heading"><div><p class="eyebrow">PALWORLD DATA</p><h1>数据参考</h1><p>ID 仅供存档编辑查询，RCON 操作无需复制或输入 ID。</p></div></div><section class="panel item-panel"><div class="panel-head"><div><h2>道具 ID 中文索引</h2><p id="item-summary">正在加载 1.0 道具数据…</p></div></div><label class="search"><span>搜索</span><input id="item-query" type="search" placeholder="输入中文名称或内部 ID，例如：帕鲁球 / PalSphere"></label><div id="item-results" class="item-results"></div></section><section class="panel item-panel"><div class="panel-head"><div><h2>帕鲁 CharacterID 中文索引</h2><p id="pal-summary">正在加载 1.0 帕鲁数据…</p></div></div><label class="search"><span>搜索</span><input id="pal-query" type="search" placeholder="输入中文名称或 CharacterID，例如：棉悠悠 / SheepBall"></label><div id="pal-results" class="item-results"></div></section></section>
-  </main>
 
-  <dialog id="restart-dialog" class="confirm-dialog">
-    <form method="dialog">
-      <span class="dialog-icon"><i class="ph ph-warning"></i></span>
-      <h2>再次确认重启服务器</h2>
-      <p>这是第二次也是最后一次确认。继续后将立即保存世界、重启 <code>palworld-server</code>，在线玩家会断开连接。</p>
-      <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-config-restart" value="confirm" class="danger">确认并立即重启</button></div>
-    </form>
-  </dialog>
+      <section class="app-view hidden" data-page="players">
+        <header class="workspace-header"><div><p class="eyebrow">ONLINE & ACCESS</p><h1>在线与权限</h1><p>围绕当前在线玩家处理身份、传送和管理操作。</p></div><button data-jump="operations" class="secondary">打开玩家管理</button></header>
+        <p id="player-copy-result" class="copy-result" aria-live="polite"></p>
+        <div id="players-page-list" class="standalone-list">正在读取在线玩家…</div>
+      </section>
 
-  <template id="world-template"><article class="world-card"><div class="world-main"><span class="status"></span><div><h3></h3><p class="meta"></p></div></div><div class="facts"><span class="format"></span><span class="players"></span><span class="backups"></span></div><div class="actions"><button class="inspect">执行 1.0 深度诊断</button><span class="result">尚未诊断</span></div></article></template>
+      <section class="app-view hidden" data-page="config">
+        <header class="workspace-header"><div><p class="eyebrow">SERVER RULES</p><h1>服务器规则</h1><p>按作用搜索并修改规则；技术键名保留为次级信息。</p></div><div class="panel-actions"><button id="export-config" class="secondary" disabled>导出 JSON</button><button id="reload-config" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新</button></div></header>
+        <section class="panel config-panel"><div class="config-toolbar"><div><h2>游戏与服务器设置</h2><p id="config-source">正在读取远端配置…</p></div><label class="config-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">筛选配置</span><input id="config-query" type="search" placeholder="搜索经验、孵化、备份等作用"></label></div><div id="config-settings" class="config-settings"><div class="empty">正在从 palworld-server 读取…</div></div><div class="config-footer"><p id="config-result" class="config-result" aria-live="polite">修改只会在保存后写入服务器；重启前不会应用。</p><button id="save-config" class="primary" disabled>备份并保存</button></div></section>
+        <section class="apply-strip"><div><i class="ph ph-warning-circle" aria-hidden="true"></i><span><strong>应用规则需要重启</strong><small>先保存世界，再重启容器并等待健康检查恢复。</small></span></div><div class="restart-confirmation"><label class="confirm-row"><input id="config-restart-confirm" type="checkbox"><span>我已检查在线玩家并理解连接会暂时中断。</span></label><button id="config-restart" class="danger" disabled>重启服务器</button></div></section>
+      </section>
+
+      <section class="app-view hidden" data-page="operations">
+        <header class="workspace-header"><div><p class="eyebrow">MAINTENANCE</p><h1>维护记录</h1><p>高风险操作集中在这里，并始终保留确认与结果记录。</p></div><span class="auto-refresh-note"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 每 15 秒刷新</span></header>
+        <div class="ops-layout"><section class="operation-workspace"><div class="segmented" role="tablist"><button class="active" data-operation-tab="common">安全重启</button><button data-operation-tab="player">玩家管理</button><button data-operation-tab="advanced">其他操作</button></div>
+          <div class="operation-pane" data-operation-pane="common"><div class="operation-title"><span class="step-number"><i class="ph ph-shield-check" aria-hidden="true"></i></span><div><h2>安全重启</h2><p>通知、保存、倒计时和关服由一个受控流程完成。</p></div></div><ol class="restart-flow"><li class="active"><span>1</span><i class="ph ph-megaphone" aria-hidden="true"></i><div><strong>广播通知</strong><small>向在线玩家说明维护时间。</small></div></li><li><span>2</span><i class="ph ph-floppy-disk" aria-hidden="true"></i><div><strong>保存世界</strong><small>通过 RCON 写入当前世界进度。</small></div></li><li><span>3</span><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong>等待玩家退出</strong><small>使用固定倒计时避免误输。</small></div></li><li><span>4</span><i class="ph ph-power" aria-hidden="true"></i><div><strong>重启服务</strong><small>关服后由现有策略自动恢复。</small></div></li></ol><div class="form-grid"><label>广播模板<select id="restart-message"><option value="服务器将在 5 分钟后重启，请尽快返回安全区域。">5 分钟维护提醒</option><option value="服务器将在 2 分钟后重启，请保存进度并尽快退出。">2 分钟紧急维护</option><option value="服务器将在 1 分钟后重启，请立即退出游戏。">1 分钟最后提醒</option></select></label><label>倒计时<select id="restart-seconds"><option value="300">5 分钟</option><option value="120">2 分钟</option><option value="60">1 分钟</option><option value="30">30 秒</option></select></label></div><label class="confirm-row"><input id="restart-confirm" type="checkbox"><span>我已检查在线玩家，并理解服务器会在倒计时结束后关服。</span></label><button id="safe-restart" class="primary wide" disabled>执行安全重启</button></div>
+          <div class="operation-pane hidden" data-operation-pane="player"><div class="operation-title"><span class="step-number"><i class="ph ph-user-focus" aria-hidden="true"></i></span><div><h2>玩家管理</h2><p>玩家 ID 由在线列表自动映射，不支持手动输入。</p></div></div><div class="form-grid single"><label>选择操作<select id="player-action"><option value="kick">踢出玩家</option><option value="ban">封禁玩家</option></select></label><label>选择在线玩家<select id="player-select"><option value="">正在读取在线玩家…</option></select></label></div><label class="confirm-row"><input id="player-confirm" type="checkbox"><span>我确认要对所选玩家执行此操作。</span></label><button id="run-player-action" class="danger wide" disabled>执行玩家操作</button></div>
+          <div class="operation-pane hidden" data-operation-pane="advanced"><div class="operation-title"><span class="step-number"><i class="ph ph-terminal-window" aria-hidden="true"></i></span><div><h2>其他操作</h2><p>仅开放官方白名单指令，参数均由界面生成。</p></div></div><div class="form-grid single"><label>操作<select id="advanced-action"><option value="save">保存世界</option><option value="broadcast">发送广播</option><option value="shutdown">计划关服</option></select></label><label id="advanced-message-wrap" class="hidden">广播模板<select id="advanced-message"><option value="服务器将在 5 分钟后维护，请尽快返回安全区域。">5 分钟维护提醒</option><option value="服务器维护已经完成，欢迎回来。">维护完成通知</option><option value="请注意：服务器即将保存世界，可能短暂卡顿。">保存世界提醒</option></select></label><label id="advanced-seconds-wrap" class="hidden">倒计时<select id="advanced-seconds"><option value="300">5 分钟</option><option value="120">2 分钟</option><option value="60">1 分钟</option><option value="30">30 秒</option></select></label></div><label class="confirm-row"><input id="advanced-confirm" type="checkbox"><span>我确认执行所选官方操作。</span></label><button id="run-advanced-action" class="primary wide" disabled>执行所选操作</button></div><p id="operation-result" class="operation-result" aria-live="polite">等待操作</p>
+          <section class="quick-actions"><h2>快捷入口</h2><button data-quick-tab="advanced" data-quick-action="save"><span><strong>保存世界</strong><small>立即保存当前进度</small></span><b>选择</b></button><button data-quick-tab="advanced" data-quick-action="broadcast"><span><strong>发送广播</strong><small>通知在线玩家</small></span><b>选择</b></button><button data-quick-tab="player" data-quick-action="kick"><span><strong>踢出玩家</strong><small>从在线列表中选择</small></span><b>选择</b></button><button data-quick-tab="player" data-quick-action="ban"><span><strong>封禁玩家</strong><small>仅针对当前在线玩家</small></span><b>选择</b></button></section></section>
+          <aside class="server-context"><section><div class="aside-heading"><h2>当前玩家</h2></div><div id="online-players" class="online-players"><p>正在读取在线列表…</p></div></section><section><div class="aside-heading"><h2>管理连接</h2><span id="rcon-state" class="connection-state loading">检查中</span></div><p class="aside-copy">地址与凭据保留在 palworld-server 容器内。</p></section><section><h2>本次维护日志</h2><div id="operation-log" class="operation-log"><p>本次会话尚无写操作</p></div></section></aside></div>
+      </section>
+
+      <section class="app-view hidden" data-page="data"><header class="workspace-header"><div><p class="eyebrow">REFERENCE</p><h1>资料索引</h1><p>按中文名称查找内部 ID；点击结果即可复制。</p></div></header><section class="panel item-panel"><div class="panel-head"><div><h2>道具</h2><p id="item-summary">正在加载 1.0 道具数据…</p></div></div><label class="search full-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索道具</span><input id="item-query" type="search" placeholder="输入中文名称或内部 ID"></label><div id="item-results" class="item-results"></div></section><section class="panel item-panel"><div class="panel-head"><div><h2>帕鲁</h2><p id="pal-summary">正在加载 1.0 帕鲁数据…</p></div></div><label class="search full-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索帕鲁</span><input id="pal-query" type="search" placeholder="输入中文名称或 CharacterID"></label><div id="pal-results" class="item-results"></div></section></section>
+    </main>
+  </div>
+
+  <dialog id="restart-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-warning"></i></span><h2>再次确认重启服务器</h2><p>继续后将立即保存世界、重启 <code>palworld-server</code>，在线玩家会断开连接。</p><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-config-restart" value="confirm" class="danger">确认并立即重启</button></div></form></dialog>
+
+  <template id="world-template"><article class="world-card"><div class="world-main"><span class="status"></span><div><h3></h3><p class="meta"></p></div></div><div class="facts"><span class="format"></span><span class="players"></span><span class="backups"></span></div><div class="actions"><button class="inspect">打开世界数据</button><span class="result">尚未诊断</span></div></article></template>
   <template id="item-template"><button class="item-row"><span class="item-icon-wrap"><img class="item-icon" alt="" loading="lazy"><i class="ph ph-package"></i></span><span class="item-copy"><strong class="item-name"></strong><small class="item-description"></small></span><code class="item-id"></code><span class="item-category"></span><span class="localization"></span></button></template>
-  <template id="container-template"><article class="container-card"><div class="container-head"><div><span class="container-label"></span><h3 class="container-type"></h3></div><span class="container-usage"></span></div><code class="container-id"></code><div class="container-items"></div></article></template>
-  <template id="user-template"><article class="user-card"><div class="user-title"><div><h3 class="user-name"></h3><code class="user-id"></code></div><span class="pal-count"></span></div><div class="detail-tabs"><button data-tab="profile" class="active">基础资料</button><button data-tab="inventory">背包道具</button><button data-tab="pals">拥有的帕鲁</button></div><form class="user-form tab-pane" data-pane="profile"><label>用户昵称<input name="nickname" maxlength="64"></label><label>等级<input name="level" type="number" min="1" max="100"></label><label>经验值<input name="experience" type="number" min="0"></label><label>未分配属性点<input name="unused_status_points" type="number" min="0" max="65535"></label><label>饱食度<input name="satiety" type="number" min="0" max="100" step="0.01"></label><label>科技点<input name="technology_points" type="number" min="0" max="9999"></label><div class="readonly-data"></div><button type="submit" class="save-user">备份并保存</button><span class="save-result"></span></form><section class="inventory-list tab-pane hidden" data-pane="inventory"></section><section class="pal-list tab-pane hidden" data-pane="pals"><div></div></section></article></template>
+  <template id="container-template"><button class="resource-row container-row"><span class="resource-row-icon"><i class="ph ph-archive" aria-hidden="true"></i></span><span class="resource-row-copy"><strong class="container-label"></strong><small class="container-type"></small></span><span class="container-usage"></span><code class="container-id"></code></button></template>
+  <template id="container-detail-template"><article class="container-detail-content"><header><div class="detail-title"><span class="detail-icon"><i class="ph ph-archive" aria-hidden="true"></i></span><div><p class="eyebrow">储物箱</p><h2 class="container-label"></h2><p class="container-type"></p></div></div><span class="read-only-state"><i class="ph ph-eye" aria-hidden="true"></i> 只读</span></header><div class="detail-stats"><div><small>已用槽位</small><strong class="slot-usage"></strong></div><div><small>道具总量</small><strong class="item-total"></strong></div></div><div class="detail-table"><div class="detail-table-head"><span>道具</span><span>数量</span></div><div class="container-items"></div></div><details class="technical-info"><summary>查看技术信息</summary><dl><div><dt>容器 GUID</dt><dd><code class="container-id"></code></dd></div><div><dt>对象类型</dt><dd><code class="object-id"></code></dd></div></dl></details></article></template>
+  <template id="user-template"><article class="user-card"><div class="user-title"><div><p class="eyebrow">玩家存档</p><h2 class="user-name"></h2><code class="user-id"></code></div><span class="pal-count"></span></div><div class="detail-tabs"><button data-tab="profile" class="active">基础资料</button><button data-tab="inventory">背包道具</button><button data-tab="pals">拥有的帕鲁</button></div><form class="user-form tab-pane" data-pane="profile"><label>用户昵称<input name="nickname" maxlength="64"></label><label>等级<input name="level" type="number" min="1" max="100"></label><label>经验值<input name="experience" type="number" min="0"></label><label>未分配属性点<input name="unused_status_points" type="number" min="0" max="65535"></label><label>饱食度<input name="satiety" type="number" min="0" max="100" step="0.01"></label><label>科技点<input name="technology_points" type="number" min="0" max="9999"></label><div class="readonly-data"></div><button type="submit" class="save-user primary">备份并保存</button><span class="save-result"></span></form><section class="inventory-list tab-pane hidden" data-pane="inventory"></section><section class="pal-list tab-pane hidden" data-pane="pals"><div></div></section></article></template>
   <script src="/assets/app.js"></script>
 </body>
 </html>

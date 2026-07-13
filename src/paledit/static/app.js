@@ -24,15 +24,32 @@ let loadedUsers = [];
 let selectedUserId = null;
 let onlinePlayers = [];
 let loadedContainers = [];
+let selectedContainerId = null;
 let serverConfig = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
+const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 let serverContextRequest = null;
 
 function showView(name) {
   document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   if (name === 'config' && !serverConfig) loadServerConfig();
+}
+
+function showResourceTab(name) {
+  document.querySelectorAll('[data-resource-tab]').forEach(button => {
+    const active = button.dataset.resourceTab === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-resource-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.resourcePane !== name));
+  const hasData = name === 'containers' ? loadedContainers.length : loadedUsers.length;
+  document.querySelector('#resource-empty').classList.toggle('hidden', Boolean(hasData));
+  document.querySelector('#container-detail').classList.toggle('hidden', name !== 'containers');
+  document.querySelector('#player-detail').classList.toggle('hidden', name !== 'users');
+  if (name === 'containers' && hasData) selectContainer(selectedContainerId || loadedContainers[0].container_id);
+  if (name === 'users' && hasData) selectUser(selectedUserId || loadedUsers[0].player_uid);
 }
 
 function setConfigResult(message, kind = '') {
@@ -331,8 +348,11 @@ function renderWorld(world) {
       if (!response.ok) throw new Error(data.detail || '诊断失败');
       result.className = 'result ok';
       result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可编辑用户与道具`;
+      button.textContent = '重新诊断';
       activeWorld = world.path;
       await Promise.all([loadUsers(), loadContainers()]);
+      document.querySelector('#resource-empty').classList.add('hidden');
+      showResourceTab('containers');
     } catch (error) {
       result.className = 'result error'; result.textContent = error.message;
     } finally { button.disabled = false; }
@@ -360,27 +380,51 @@ function renderContainers() {
   });
   containersNode.innerHTML = '';
   for (const container of rows) {
-    const card = containerTemplate.content.firstElementChild.cloneNode(true);
-    card.querySelector('.container-label').textContent = container.label || '未命名容器';
-    card.querySelector('.container-type').textContent = `${container.type_name} · ${container.object_id}`;
-    card.querySelector('.container-id').textContent = container.container_id;
-    card.querySelector('.container-usage').textContent = `${container.occupied_slots}/${container.slot_capacity || '—'} 槽 · ${container.total_items.toLocaleString()} 件`;
-    const items = card.querySelector('.container-items');
-    const occupied = container.slots.filter(slot => slot.item_id !== 'None' && slot.count > 0);
-    if (!occupied.length) items.innerHTML = '<p class="container-empty">空箱</p>';
-    for (const slot of occupied) {
-      const row = document.createElement('div'); row.className = 'container-item';
-      const image = document.createElement('img'); image.className = 'mini-item-icon'; image.alt = ''; image.loading = 'lazy';
-      if (slot.icon_url) image.src = slot.icon_url; else image.classList.add('hidden');
-      const copy = document.createElement('span'); copy.innerHTML = '<strong></strong><small></small>';
-      copy.querySelector('strong').textContent = slot.name_zh;
-      copy.querySelector('small').textContent = `${slot.category} · ${slot.item_id}`;
-      const count = document.createElement('b'); count.textContent = `× ${slot.count.toLocaleString()}`;
-      row.append(image, copy, count); items.append(row);
-    }
-    containersNode.append(card);
+    const row = containerTemplate.content.firstElementChild.cloneNode(true);
+    row.querySelector('.container-label').textContent = container.label || '未命名容器';
+    row.querySelector('.container-type').textContent = container.type_name;
+    row.querySelector('.container-id').textContent = container.container_id;
+    row.querySelector('.container-usage').textContent = `${container.occupied_slots}/${container.slot_capacity || '—'} 槽`;
+    row.classList.toggle('active', container.container_id === selectedContainerId);
+    row.addEventListener('click', () => selectContainer(container.container_id));
+    containersNode.append(row);
   }
   if (!rows.length) containersNode.innerHTML = '<div class="empty">没有匹配的箱子或容器</div>';
+  if (rows.length && !rows.some(row => row.container_id === selectedContainerId)) selectContainer(rows[0].container_id);
+}
+
+function selectContainer(containerId) {
+  selectedContainerId = containerId;
+  const container = loadedContainers.find(row => row.container_id === containerId);
+  [...containersNode.querySelectorAll('.container-row')].forEach(row => row.classList.toggle('active', row.querySelector('.container-id').textContent === containerId));
+  const detailRoot = document.querySelector('#container-detail');
+  detailRoot.innerHTML = '';
+  if (!container) {
+    detailRoot.innerHTML = '<div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div>';
+    return;
+  }
+  const detail = document.querySelector('#container-detail-template').content.firstElementChild.cloneNode(true);
+  detail.querySelector('.container-label').textContent = container.label || '未命名容器';
+  detail.querySelector('.container-type').textContent = container.type_name;
+  detail.querySelector('.slot-usage').textContent = `${container.occupied_slots} / ${container.slot_capacity || '—'}`;
+  detail.querySelector('.item-total').textContent = `${container.total_items.toLocaleString()} 件`;
+  detail.querySelector('.container-id').textContent = container.container_id;
+  detail.querySelector('.object-id').textContent = container.object_id;
+  const items = detail.querySelector('.container-items');
+  const occupied = container.slots.filter(slot => slot.item_id !== 'None' && slot.count > 0);
+  if (!occupied.length) items.innerHTML = '<p class="container-empty">这个储物箱是空的</p>';
+  for (const slot of occupied) {
+    const row = document.createElement('div'); row.className = 'container-item';
+    const main = document.createElement('div'); main.className = 'container-item-main';
+    const image = document.createElement('img'); image.className = 'mini-item-icon'; image.alt = ''; image.loading = 'lazy';
+    if (slot.icon_url) image.src = slot.icon_url; else image.classList.add('hidden');
+    const copy = document.createElement('span'); copy.innerHTML = '<strong></strong><small></small>';
+    copy.querySelector('strong').textContent = slot.name_zh;
+    copy.querySelector('small').textContent = `${slot.category} · ${slot.item_id}`;
+    const count = document.createElement('b'); count.textContent = slot.count.toLocaleString();
+    main.append(image, copy); row.append(main, count); items.append(row);
+  }
+  detailRoot.append(detail);
 }
 
 async function loadUsers() {
@@ -403,8 +447,10 @@ async function loadUsers() {
     button.addEventListener('click', () => selectUser(user.player_uid));
     usersNode.append(button);
   }
-  if (!selectedUserId || !data.users.some(user => user.player_uid === selectedUserId)) selectedUserId = data.users[0]?.player_uid;
-  selectUser(selectedUserId);
+  if (!selectedUserId || !data.users.some(user => user.player_uid === selectedUserId)) {
+    selectedUserId = data.users.find(user => user.player_uid.toLowerCase() === OWNER_PLAYER_UID)?.player_uid || data.users[0]?.player_uid;
+  }
+  if (document.querySelector('[data-resource-tab="users"]').classList.contains('active')) selectUser(selectedUserId);
 }
 
 function selectUser(playerUid) {
@@ -501,14 +547,20 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
     result.textContent = `更新完成 · ${data.world_count} 个世界${data.backup_path ? ` · 原数据备份：${data.backup_path}` : ''}`;
     activeWorld = null;
     activeWorldHash = null;
+    loadedContainers = [];
+    loadedUsers = [];
+    selectedContainerId = null;
     userPanel.classList.add('hidden');
+    containerPanel.classList.add('hidden');
+    document.querySelector('#resource-empty').classList.remove('hidden');
+    document.querySelector('#container-detail').innerHTML = '<div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div>';
     await scan();
   } catch (error) {
     result.className = 'sync-result error';
     result.textContent = error.message;
   } finally {
     button.disabled = false;
-    button.textContent = '从 palworld-server 更新数据';
+    button.innerHTML = '<i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 从服务器同步';
   }
 });
 document.querySelector('#reload-users').addEventListener('click', loadUsers);
@@ -565,6 +617,7 @@ palQuery.addEventListener('input', () => {
 });
 containerQuery.addEventListener('input', renderContainers);
 document.querySelector('#reload-containers').addEventListener('click', loadContainers);
+document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEventListener('click', () => showResourceTab(button.dataset.resourceTab)));
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
 document.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => {
@@ -674,6 +727,7 @@ document.querySelectorAll('[data-quick-action]').forEach(button => button.addEve
 }));
 
 syncAdvancedForm();
+showView('saves');
 scan();
 loadItems();
 loadPals();
