@@ -14,6 +14,7 @@ from .remote import (
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 from .save import InvalidSaveError, discover_worlds, sha256
+from .skills import search_skills
 from .world import list_storage_containers, list_users, update_inventory_slot, update_user
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -50,6 +51,11 @@ def item(item_id: str) -> dict[str, object]:
 @app.get("/api/pals")
 def pals(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
     return search_pals(q, limit)
+
+
+@app.get("/api/skills")
+def skills(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+    return search_skills(q, limit)
 
 
 @app.get("/api/worlds")

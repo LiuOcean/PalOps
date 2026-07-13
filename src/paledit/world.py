@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .pals import load_pal_index
+from .pals import get_pal
 from .items import load_item_index
 from .parser import character_custom_properties, locate_item_container_objects, open_world, open_world_with_raw
 from .save import sha256
@@ -179,7 +179,6 @@ def list_users(world_path: Path) -> dict[str, object]:
     world_path = world_path.expanduser().resolve()
     gvas, _ = open_world(world_path / "Level.sav")
     entities = gvas.properties["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
-    pal_names = {row["character_id"]: row["name_zh"] for row in load_pal_index()["pals"]}
     containers = inventory_containers(gvas)
     users: dict[str, dict[str, object]] = {}
     pals_by_owner: dict[str, list[dict[str, object]]] = {}
@@ -210,10 +209,12 @@ def list_users(world_path: Path) -> dict[str, object]:
             if owner == "00000000-0000-0000-0000-000000000000":
                 continue
             character_id = str(value_of(param.get("CharacterID"), ""))
+            pal_meta = get_pal(character_id) or {}
             pals_by_owner.setdefault(owner, []).append({
                 "instance_id": instance_id,
                 "character_id": character_id,
-                "name_zh": pal_names.get(character_id, character_id),
+                "name_zh": pal_meta.get("name_zh", character_id),
+                "icon_url": pal_meta.get("icon_url", ""),
                 "nickname": value_of(param.get("NickName"), ""),
                 "level": int(value_of(param.get("Level"), 1)),
                 "experience": int(value_of(param.get("Exp"), 0)),

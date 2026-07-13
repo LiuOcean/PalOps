@@ -15,8 +15,9 @@
 - RCON 指令、玩家 UID 与倒计时均由下拉菜单生成，不提供任意命令或 ID 输入框；
 - 展示当前世界用户、属性数据及其拥有的帕鲁，并可安全修改用户基础字段。
 - 提供帕鲁世界地图，通过服务器官方 REST 接口映射当前在线玩家的实时位置与 82 个传送点；点击玩家可查看坐标、身份，并复用复制 ID、`TeleportToMe`、`TeleportToPlayer` 功能。
-- 内置 Palworld 1.0 道具内部 ID 中文索引，可按中文名或 ID 搜索。
-- 内置帕鲁 `CharacterID` 中文索引，包含普通、Boss、Raid、塔主和任务变体。
+- 内置 Palworld 1.0 道具内部 ID 中文索引、详细说明和本地图标，可按中文名或 ID 搜索。
+- 内置帕鲁 `CharacterID` 中文索引与本地图标，包含普通、Boss、Raid、塔主和任务变体。
+- 内置被动技能中文名称和效果说明，可按名称、说明或技能 ID 搜索。
 
 ## macOS 启动
 
@@ -50,6 +51,14 @@ uv run paledit inspect Save/SaveGames/0/00000000000000000000000000000000
 ```bash
 uv run python tools/update_item_index.py
 uv run python tools/update_pal_index.py
+uv run python tools/sync_pst_catalog.py
 ```
 
+前两步更新 PalDB 基础索引；最后一步从固定提交
+`zaigie/palworld-server-tool@18df587bd9e62d0f890b8cef1c32985fa6e9ba39`
+合并详细道具说明、完整帕鲁名称、被动技能和本地图标。需要审阅新版本时，先修改
+`tools/sync_pst_catalog.py` 中的固定提交并核对上游数据格式，再运行同步。
+
 没有可靠中文名称的内部条目不会自动翻译，而是保留源名称并标记为“待本地化”。
+上游仓库采用 Apache-2.0；游戏名称、图标和其他美术资源的权利仍归各自权利人所有，
+完整归属说明见 `src/paledit/static/catalog/THIRD_PARTY_NOTICE.txt`。

@@ -8,6 +8,9 @@ const itemQuery = document.querySelector('#item-query');
 const palResults = document.querySelector('#pal-results');
 const palSummary = document.querySelector('#pal-summary');
 const palQuery = document.querySelector('#pal-query');
+const skillResults = document.querySelector('#skill-results');
+const skillSummary = document.querySelector('#skill-summary');
+const skillQuery = document.querySelector('#skill-query');
 const userPanel = document.querySelector('#user-panel');
 const usersNode = document.querySelector('#users');
 const userSummary = document.querySelector('#user-summary');
@@ -726,10 +729,17 @@ function renderUser(user) {
   const palBox = card.querySelector('.pal-list div');
   for (const pal of user.pals) {
     const row = document.createElement('div'); row.className = 'pal-chip';
-    const label = document.createElement('span');
-    label.textContent = `${pal.name_zh}${pal.nickname ? ` · ${pal.nickname}` : ''} · Lv.${pal.level}`;
+    const image = document.createElement('img'); image.className = 'mini-pal-icon'; image.alt = '';
+    if (pal.icon_url) image.src = pal.icon_url; else image.classList.add('hidden');
+    const copy = document.createElement('span'); copy.className = 'pal-chip-copy';
+    const label = document.createElement('strong');
+    label.textContent = `${pal.name_zh}${pal.nickname ? ` · ${pal.nickname}` : ''}`;
+    const facts = document.createElement('small');
+    const gender = pal.gender === 'EPalGenderType::Male' ? '雄性' : pal.gender === 'EPalGenderType::Female' ? '雌性' : '';
+    facts.textContent = [`Lv.${pal.level}`, gender, pal.is_boss ? 'Boss' : '', pal.is_lucky ? '闪光' : ''].filter(Boolean).join(' · ');
+    copy.append(label, facts);
     const id = document.createElement('code'); id.textContent = pal.character_id;
-    row.append(label, id);
+    row.append(image, copy, id);
     palBox.append(row);
   }
   const inventoryBox = card.querySelector('.inventory-list');
@@ -821,15 +831,24 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
 });
 document.querySelector('#reload-users').addEventListener('click', loadUsers);
 let searchTimer;
+function setCatalogImage(row, url, fallbackIcon = 'ph-package') {
+  const wrap = row.querySelector('.item-icon-wrap');
+  const image = row.querySelector('.item-icon');
+  const icon = wrap.querySelector('i');
+  icon.className = `ph ${fallbackIcon}`;
+  if (!url) { wrap.classList.add('missing'); return; }
+  image.src = url;
+  image.addEventListener('error', () => wrap.classList.add('missing'), {once:true});
+}
+
 async function loadItems(query = '') {
   const response = await fetch(`/api/items?q=${encodeURIComponent(query)}&limit=100`);
   const data = await response.json();
-  itemSummary.textContent = `${data.total_items.toLocaleString()} 个内部 ID · ${data.localized_items.toLocaleString()} 个中文名称 · PalDB 1.0 数据`;
+  itemSummary.textContent = `${data.total_items.toLocaleString()} 个内部 ID · ${data.localized_items.toLocaleString()} 个中文名称 · 本地图标与详细说明`;
   itemResults.innerHTML = '';
   for (const item of data.results) {
     const row = itemTemplate.content.firstElementChild.cloneNode(true);
-    const image = row.querySelector('.item-icon');
-    if (item.icon_url) image.src = item.icon_url; else row.querySelector('.item-icon-wrap').classList.add('missing');
+    setCatalogImage(row, item.icon_url);
     row.querySelector('.item-name').textContent = item.name_zh;
     row.querySelector('.item-description').textContent = item.description;
     row.querySelector('.item-id').textContent = item.id;
@@ -850,13 +869,13 @@ let palSearchTimer;
 async function loadPals(query = '') {
   const response = await fetch(`/api/pals?q=${encodeURIComponent(query)}&limit=100`);
   const data = await response.json();
-  palSummary.textContent = `${data.total_pals.toLocaleString()} 个 CharacterID · ${data.localized_pals.toLocaleString()} 个中文名称 · PalDB 1.0 数据`;
+  palSummary.textContent = `${data.total_pals.toLocaleString()} 个 CharacterID · ${data.localized_pals.toLocaleString()} 个中文名称 · 本地帕鲁图标`;
   palResults.innerHTML = '';
   for (const pal of data.results) {
     const row = itemTemplate.content.firstElementChild.cloneNode(true);
-    row.querySelector('.item-icon-wrap').classList.add('missing');
+    setCatalogImage(row, pal.icon_url, 'ph-paw-print');
     row.querySelector('.item-name').textContent = pal.name_zh;
-    row.querySelector('.item-description').textContent = 'Palworld 角色数据标识。';
+    row.querySelector('.item-description').textContent = 'Palworld 角色数据标识与本地图鉴图标。';
     row.querySelector('.item-id').textContent = pal.character_id;
     row.querySelector('.item-category').textContent = '帕鲁';
     const status = row.querySelector('.localization');
@@ -870,6 +889,29 @@ async function loadPals(query = '') {
 palQuery.addEventListener('input', () => {
   clearTimeout(palSearchTimer);
   palSearchTimer = setTimeout(() => loadPals(palQuery.value), 180);
+});
+let skillSearchTimer;
+async function loadSkills(query = '') {
+  const response = await fetch(`/api/skills?q=${encodeURIComponent(query)}&limit=100`);
+  const data = await response.json();
+  skillSummary.textContent = `${data.total_skills.toLocaleString()} 个被动技能 · 可搜索名称、效果与内部 ID`;
+  skillResults.innerHTML = '';
+  for (const skill of data.results) {
+    const row = itemTemplate.content.firstElementChild.cloneNode(true);
+    setCatalogImage(row, '', 'ph-sparkle');
+    row.querySelector('.item-name').textContent = skill.name_zh;
+    row.querySelector('.item-description').textContent = skill.description || '暂无效果说明。';
+    row.querySelector('.item-id').textContent = skill.skill_id;
+    row.querySelector('.item-category').textContent = '被动技能';
+    row.querySelector('.localization').textContent = '中文';
+    row.addEventListener('click', () => navigator.clipboard.writeText(skill.skill_id));
+    skillResults.append(row);
+  }
+  if (!data.results.length) skillResults.innerHTML = '<div class="empty">没有匹配的被动技能</div>';
+}
+skillQuery.addEventListener('input', () => {
+  clearTimeout(skillSearchTimer);
+  skillSearchTimer = setTimeout(() => loadSkills(skillQuery.value), 180);
 });
 containerQuery.addEventListener('input', renderContainers);
 document.querySelector('#reload-containers').addEventListener('click', loadContainers);
@@ -1019,6 +1061,7 @@ showView('saves');
 scan();
 loadItems();
 loadPals();
+loadSkills();
 loadServerContext();
 window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
 document.addEventListener('visibilitychange', refreshServerContextInBackground);
