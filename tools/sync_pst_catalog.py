@@ -177,13 +177,16 @@ def build_skills(repo_root: Path, source: Path, generated_at: str) -> dict[str, 
     for skill_id in sorted(set(current_rows) | set(upstream_rows), key=str.casefold):
         upstream = upstream_rows.get(skill_id)
         existing = current_rows.get(skill_id, {})
-        skills.append({
+        skill = {
             "skill_id": skill_id,
             "name_zh": str((upstream or {}).get("name") or existing.get("name_zh") or skill_id),
             "description": str((upstream or {}).get("desc") or existing.get("description") or ""),
-        })
+        }
+        if isinstance(existing.get("rank"), int):
+            skill["rank"] = existing["rank"]
+        skills.append(skill)
     payload = {
-        "schema_version": 1,
+        "schema_version": int(current.get("schema_version", 1)),
         "source": {
             "repository": UPSTREAM_REPOSITORY,
             "commit": UPSTREAM_COMMIT,
@@ -194,6 +197,8 @@ def build_skills(repo_root: Path, source: Path, generated_at: str) -> dict[str, 
         "skill_count": len(skills),
         "skills": skills,
     }
+    if current.get("rank_source"):
+        payload["rank_source"] = current["rank_source"]
     write_json(target, payload)
     return payload
 

@@ -15,10 +15,14 @@ def test_skill_searches_id_name_and_description() -> None:
 
 def test_skill_lookup_and_unknown_fallback() -> None:
     assert get_skill("legend")["name_zh"] == "传说"
+    assert get_skill("legend")["rank"] == 4
+    assert get_skill("WorldTree_ATK")["rank"] == 5
+    assert get_skill("PAL_ALLAttack_down2")["rank"] == -3
     described = describe_skills(["Legend", "Future_Unknown_Skill"])
     assert described[0]["description"]
     assert described[1] == {
         "skill_id": "Future_Unknown_Skill",
         "name_zh": "Future_Unknown_Skill",
         "description": "",
+        "rank": None,
     }

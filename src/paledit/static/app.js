@@ -1561,6 +1561,18 @@ function selectUser(playerUid) {
 
 const OWNED_PAL_PAGE_SIZE = 40;
 
+function createSkillRankBadge(rank) {
+  const value = Number(rank);
+  if (!Number.isInteger(value) || value === 0) return null;
+  const direction = value > 0 ? 'positive' : 'negative';
+  const badge = document.createElement('span');
+  badge.className = `skill-rank-badge skill-rank-${direction} skill-rank-${Math.abs(value)}`;
+  badge.textContent = `${value > 0 ? '▲' : '▼'} ${Math.abs(value)}`;
+  badge.title = `${value > 0 ? '正向' : '负向'}品级 ${Math.abs(value)}`;
+  badge.setAttribute('aria-label', badge.title);
+  return badge;
+}
+
 function ownedPalSearchText(pal) {
   const skills = (pal.passive_skills || []).flatMap(skill => [skill.skill_id, skill.name_zh, skill.description]);
   return [pal.name_zh, pal.nickname, pal.character_id, ...skills].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN');
@@ -1609,9 +1621,12 @@ function renderOwnedPal(pal) {
   for (const skill of pal.passive_skills || []) {
     const skillRow = document.createElement('div'); skillRow.className = 'passive-skill-row';
     const title = document.createElement('span');
+    const nameLine = document.createElement('span'); nameLine.className = 'passive-skill-name';
     const name = document.createElement('strong'); name.textContent = skill.name_zh;
+    const rank = createSkillRankBadge(skill.rank);
     const skillId = document.createElement('code'); skillId.textContent = skill.skill_id;
-    title.append(name, skillId);
+    nameLine.append(name); if (rank) nameLine.append(rank);
+    title.append(nameLine, skillId);
     const description = document.createElement('p'); description.textContent = skill.description || '暂无效果说明。';
     skillRow.append(title, description); skillList.append(skillRow);
   }
@@ -1838,7 +1853,8 @@ async function loadSkills(query = '') {
     row.querySelector('.item-name').textContent = skill.name_zh;
     row.querySelector('.item-description').textContent = skill.description || '暂无效果说明。';
     row.querySelector('.item-id').textContent = skill.skill_id;
-    row.querySelector('.item-category').textContent = '被动技能';
+    const category = row.querySelector('.item-category'); category.textContent = '被动技能';
+    const rank = createSkillRankBadge(skill.rank); if (rank) category.append(rank);
     row.querySelector('.localization').textContent = '中文';
     row.addEventListener('click', () => navigator.clipboard.writeText(skill.skill_id));
     skillResults.append(row);

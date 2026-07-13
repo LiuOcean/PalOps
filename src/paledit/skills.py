@@ -32,7 +32,12 @@ def describe_skills(skill_ids: list[str]) -> list[dict[str, object]]:
         result.append(
             dict(skill)
             if skill
-            else {"skill_id": skill_id, "name_zh": skill_id, "description": ""}
+            else {
+                "skill_id": skill_id,
+                "name_zh": skill_id,
+                "description": "",
+                "rank": None,
+            }
         )
     return result
 

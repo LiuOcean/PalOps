@@ -35,3 +35,4 @@ def test_pal_readonly_details_exposes_talents_rank_and_skills() -> None:
         "work_speed": 20,
     }
     assert details["passive_skills"][0]["name_zh"] == "传说"
+    assert details["passive_skills"][0]["rank"] == 4
