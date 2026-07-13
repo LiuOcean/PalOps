@@ -2,12 +2,12 @@
   "schema_version": 2,
   "source": "https://paldb.cc/cn/Pals_Table",
   "source_table": "Pal/Content/Pal/DataTable/Character/DT_PalMonsterParameter.uasset",
-  "generated_at": "2026-07-13T12:48:25+08:00",
+  "generated_at": "2026-07-13T02:45:30+08:00",
   "pal_count": 1156,
   "localized_count": 1105,
   "enrichment_source": {
     "repository": "https://github.com/zaigie/palworld-server-tool",
-    "commit": "18df587bd9e62d0f890b8cef1c32985fa6e9ba39",
+    "commit": "7df5ec40c5d3f3ef50200f2048dc116a0b9938bf",
     "data_file": "web/src/assets/pal.json",
     "license": "Apache-2.0"
   },

@@ -29,6 +29,7 @@ def inspect_save(path: Path) -> SaveFileInfo:
         name=path.name,
         path=str(path),
         size=path.stat().st_size,
+        modified_at=path.stat().st_mtime,
         magic=magic,
         format=format_name,
         save_type=save_type,

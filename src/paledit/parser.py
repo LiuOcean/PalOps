@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import struct
+from threading import Lock, RLock
 from typing import Any
 
 CHARACTER_RAW_PATH = ".worldSaveData.CharacterSaveParameterMap.Value.RawData"
 ITEM_CONTAINER_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.RawData"
 ITEM_SLOT_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.Slots.Slots.RawData"
+PARSER_REVISION = "paledit-1.0-v0.12-compat-1"
+
+
+@dataclass(frozen=True, slots=True)
+class WorldSnapshot:
+    """One coherent, read-only decode of a Level.sav payload."""
+
+    level_path: Path
+    level_sha256: str
+    gvas: Any
+    save_type: int
+    raw_gvas: bytes
+
+
+_SNAPSHOT_CACHE: dict[tuple[Path, str], WorldSnapshot] = {}
+_SNAPSHOT_LOCKS: dict[Path, Lock] = {}
+_SNAPSHOT_GUARD = RLock()
 
 
 def character_custom_properties() -> dict[str, object]:
@@ -39,6 +59,78 @@ def open_world_with_raw(level_path: Path):
     raw_gvas, save_type = decompress_sav_to_gvas(data)
     gvas = GvasFile.read(raw_gvas, palworld_1_0_type_hints(), character_custom_properties())
     return gvas, save_type, raw_gvas
+
+
+def _decode_world_bytes(level_path: Path, data: bytes) -> WorldSnapshot:
+    from palworld_save_tools.gvas import GvasFile
+    from palworld_save_tools.palsav import decompress_sav_to_gvas
+    from .compat import install_palworld_1_0_property_support, palworld_1_0_type_hints
+
+    install_palworld_1_0_property_support()
+    raw_gvas, save_type = decompress_sav_to_gvas(data)
+    gvas = GvasFile.read(raw_gvas, palworld_1_0_type_hints(), character_custom_properties())
+    return WorldSnapshot(
+        level_path=level_path,
+        level_sha256=hashlib.sha256(data).hexdigest(),
+        gvas=gvas,
+        save_type=save_type,
+        raw_gvas=raw_gvas,
+    )
+
+
+def get_world_snapshot(level_path: Path) -> WorldSnapshot:
+    """Return a hash-keyed shared decode, serializing decompression per world.
+
+    The file is read before entering the decode lock so every returned snapshot
+    is internally coherent. A later external file replacement naturally creates
+    a new hash generation on the next request.
+    """
+    resolved = level_path.expanduser().resolve()
+    data = resolved.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    key = (resolved, digest)
+    with _SNAPSHOT_GUARD:
+        cached = _SNAPSHOT_CACHE.get(key)
+        if cached is not None:
+            return cached
+        decode_lock = _SNAPSHOT_LOCKS.setdefault(resolved, Lock())
+    with decode_lock:
+        with _SNAPSHOT_GUARD:
+            cached = _SNAPSHOT_CACHE.get(key)
+            if cached is not None:
+                return cached
+        snapshot = _decode_world_bytes(resolved, data)
+        with _SNAPSHOT_GUARD:
+            for stale_key in [item for item in _SNAPSHOT_CACHE if item[0] == resolved]:
+                _SNAPSHOT_CACHE.pop(stale_key, None)
+            _SNAPSHOT_CACHE[key] = snapshot
+        return snapshot
+
+
+def invalidate_world_snapshot(path: Path | None = None) -> None:
+    """Invalidate one world/Level.sav or the complete read cache."""
+    with _SNAPSHOT_GUARD:
+        if path is None:
+            _SNAPSHOT_CACHE.clear()
+            return
+        resolved = path.expanduser().resolve()
+        level_path = resolved / "Level.sav" if resolved.is_dir() or resolved.name != "Level.sav" else resolved
+        for key in [item for item in _SNAPSHOT_CACHE if item[0] == level_path]:
+            _SNAPSHOT_CACHE.pop(key, None)
+
+
+def parser_capabilities() -> dict[str, bool]:
+    return {
+        "fixed_point_64": True,
+        "nested_byte_property": True,
+        "item_slots": True,
+        "guild_members": True,
+        "base_camps": True,
+        "last_online_iso": True,
+        "raw_map_fallback": True,
+        "safe_character_writes": True,
+        "safe_inventory_writes": True,
+    }
 
 
 def _read_fstring(data: bytes, offset: int) -> tuple[str, int]:
@@ -128,11 +220,12 @@ def load_character_data(level_path: Path) -> dict[str, Any]:
     Unknown and currently incompatible raw structures remain opaque, which is
     essential for future lossless writes.
     """
-    gvas, save_type = open_world(level_path)
-    world = gvas.properties["worldSaveData"]["value"]
+    snapshot = get_world_snapshot(level_path)
+    world = snapshot.gvas.properties["worldSaveData"]["value"]
     characters = world["CharacterSaveParameterMap"]["value"]
     return {
-        "save_type": save_type,
+        "save_type": snapshot.save_type,
+        "level_sha256": snapshot.level_sha256,
         "character_count": len(characters),
         "world_property_count": len(world),
         "characters": characters,

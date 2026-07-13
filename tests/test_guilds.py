@@ -67,6 +67,8 @@ def test_decode_guild_raw_exposes_members_leader_and_base_ids() -> None:
     assert guild["admin_player_uid"] == ADMIN_UID
     assert guild["member_count"] == 2
     assert guild["players"][1]["player_uid"] == MEMBER_UID
+    assert guild["players"][1]["last_online_ticks"] == 123456789
+    assert guild["players"][1]["last_online"].endswith("Z")
     assert guild["base_ids"] == [BASE_ID]
     assert guild["members_decoded"] is True
 

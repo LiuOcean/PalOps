@@ -4,13 +4,22 @@ import copy
 import os
 import shutil
 import struct
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .pals import get_pal
 from .items import load_item_index
-from .parser import character_custom_properties, locate_item_container_objects, open_world, open_world_with_raw
+from .parser import (
+    PARSER_REVISION,
+    WorldSnapshot,
+    character_custom_properties,
+    get_world_snapshot,
+    invalidate_world_snapshot,
+    locate_item_container_objects,
+    open_world,
+    parser_capabilities,
+)
 from .save import sha256
 from .skills import describe_skills
 
@@ -55,7 +64,26 @@ def array_values(prop: dict[str, Any] | None) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
-def decode_guild_raw(raw_values: Any, group_type: str) -> dict[str, object] | None:
+def unreal_ticks_to_iso(ticks: int, real_date_time_ticks: int | None = None, filetime: float | None = None) -> str | None:
+    """Convert Palworld ticks to UTC, using the save clock when available."""
+    if ticks <= 0:
+        return None
+    try:
+        if real_date_time_ticks is not None and filetime is not None:
+            value = datetime.fromtimestamp(filetime + (ticks - real_date_time_ticks) / 10_000_000, tz=UTC)
+        else:
+            value = datetime(1, 1, 1, tzinfo=UTC) + timedelta(microseconds=ticks // 10)
+    except (OverflowError, ValueError):
+        return None
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def decode_guild_raw(
+    raw_values: Any,
+    group_type: str,
+    real_date_time_ticks: int | None = None,
+    filetime: float | None = None,
+) -> dict[str, object] | None:
     """Decode the stable, read-only guild subset from a 1.0 raw group payload."""
     if group_type != "EPalGroupType::Guild":
         return None
@@ -104,6 +132,7 @@ def decode_guild_raw(raw_values: Any, group_type: str) -> dict[str, object] | No
                 "player_uid": player_uid,
                 "nickname": nickname,
                 "last_online_ticks": last_online_ticks,
+                "last_online": unreal_ticks_to_iso(last_online_ticks, real_date_time_ticks, filetime),
             })
         members_decoded = True
     except (EOFError, OSError, TypeError, UnicodeDecodeError, ValueError, struct.error):
@@ -229,11 +258,12 @@ def inventory_containers(gvas: Any) -> dict[str, list[dict[str, object]]]:
     return result
 
 
-def list_storage_containers(world_path: Path) -> dict[str, object]:
+def list_storage_containers(world_path: Path, snapshot: WorldSnapshot | None = None) -> dict[str, object]:
     from palworld_save_tools.archive import FArchiveWriter
 
     world_path = world_path.expanduser().resolve()
-    gvas, _, raw_gvas = open_world_with_raw(world_path / "Level.sav")
+    snapshot = snapshot or get_world_snapshot(world_path / "Level.sav")
+    gvas, raw_gvas = snapshot.gvas, snapshot.raw_gvas
     rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
     containers = inventory_containers(gvas)
     metadata: dict[str, dict[str, object]] = {}
@@ -273,17 +303,19 @@ def list_storage_containers(world_path: Path) -> dict[str, object]:
     result.sort(key=lambda row: (not bool(row["label"]), str(row["label"]), str(row["object_id"]), str(row["container_id"])))
     return {
         "world_id": world_path.name,
-        "level_sha256": sha256(world_path / "Level.sav"),
+        "level_sha256": snapshot.level_sha256,
         "containers": result,
         "count": len(result),
         "labeled_count": sum(bool(row["label"]) for row in result),
     }
 
 
-def list_guilds(world_path: Path) -> dict[str, object]:
+def list_guilds(world_path: Path, snapshot: WorldSnapshot | None = None) -> dict[str, object]:
     world_path = world_path.expanduser().resolve()
-    gvas, _ = open_world(world_path / "Level.sav")
-    world = gvas.properties["worldSaveData"]["value"]
+    snapshot = snapshot or get_world_snapshot(world_path / "Level.sav")
+    world = snapshot.gvas.properties["worldSaveData"]["value"]
+    real_date_time_ticks = int(value_of(world.get("GameTimeSaveData", {}).get("value", {}).get("RealDateTimeTicks"), 0))
+    filetime = snapshot.level_path.stat().st_mtime
 
     base_camps: list[dict[str, object]] = []
     for row in value_of(world.get("BaseCampSaveData"), []):
@@ -296,7 +328,7 @@ def list_guilds(world_path: Path) -> dict[str, object]:
         group_type = str(value_of(row["value"].get("GroupType"), ""))
         raw = value_of(row["value"].get("RawData"), {})
         values = raw.get("values", ()) if isinstance(raw, dict) else ()
-        guild = decode_guild_raw(values, group_type)
+        guild = decode_guild_raw(values, group_type, real_date_time_ticks, filetime)
         if guild is None:
             continue
         base_ids = set(guild["base_ids"])
@@ -312,7 +344,7 @@ def list_guilds(world_path: Path) -> dict[str, object]:
     guilds.sort(key=lambda guild: (-int(guild["base_camp_level"]), str(guild["display_name"])))
     return {
         "world_id": world_path.name,
-        "level_sha256": sha256(world_path / "Level.sav"),
+        "level_sha256": snapshot.level_sha256,
         "guilds": guilds,
         "count": len(guilds),
         "base_count": len(base_camps),
@@ -337,11 +369,11 @@ def status_points(prop: dict[str, Any] | None) -> dict[str, int]:
     return result
 
 
-def list_users(world_path: Path) -> dict[str, object]:
+def list_users(world_path: Path, snapshot: WorldSnapshot | None = None) -> dict[str, object]:
     world_path = world_path.expanduser().resolve()
-    gvas, _ = open_world(world_path / "Level.sav")
-    entities = gvas.properties["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
-    containers = inventory_containers(gvas)
+    snapshot = snapshot or get_world_snapshot(world_path / "Level.sav")
+    entities = snapshot.gvas.properties["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    containers = inventory_containers(snapshot.gvas)
     users: dict[str, dict[str, object]] = {}
     pals_by_owner: dict[str, list[dict[str, object]]] = {}
     for entity in entities:
@@ -396,7 +428,38 @@ def list_users(world_path: Path) -> dict[str, object]:
             user["inventory_container_ids"] = ids
         except (FileNotFoundError, KeyError):
             user["inventories"] = {}
-    return {"world_id": world_path.name, "level_sha256": sha256(world_path / "Level.sav"), "users": list(users.values())}
+    return {"world_id": world_path.name, "level_sha256": snapshot.level_sha256, "users": list(users.values())}
+
+
+def world_snapshot_payload(world_path: Path) -> dict[str, object]:
+    """Build every read model from one shared Level.sav generation."""
+    world_path = world_path.expanduser().resolve()
+    snapshot = get_world_snapshot(world_path / "Level.sav")
+    world = snapshot.gvas.properties["worldSaveData"]["value"]
+    users = list_users(world_path, snapshot)
+    containers = list_storage_containers(world_path, snapshot)
+    guilds = list_guilds(world_path, snapshot)
+    warnings = [
+        "MapObject 使用原始字节扫描回退；未知结构保持不透明并禁止整图重编码。",
+    ]
+    return {
+        "world_id": world_path.name,
+        "level_sha256": snapshot.level_sha256,
+        "parser_revision": PARSER_REVISION,
+        "capabilities": parser_capabilities(),
+        "warnings": warnings,
+        "summary": {
+            "character_count": len(world["CharacterSaveParameterMap"]["value"]),
+            "world_property_count": len(world),
+            "user_count": len(users["users"]),
+            "container_count": containers["count"],
+            "guild_count": guilds["count"],
+            "base_count": guilds["base_count"],
+        },
+        "users": users["users"],
+        "containers": containers["containers"],
+        "guilds": guilds["guilds"],
+    }
 
 
 def _write_world(world_path: Path, gvas: Any) -> Path:
@@ -411,6 +474,7 @@ def _write_world(world_path: Path, gvas: Any) -> Path:
     temp_path.write_bytes(output)
     open_world(temp_path)
     os.replace(temp_path, level_path)
+    invalidate_world_snapshot(level_path)
     return backup_root
 
 
@@ -479,6 +543,7 @@ def update_user(world_path: Path, player_uid: str, changes: dict[str, object], e
         temp_path.write_bytes(output)
         open_world(temp_path)
         os.replace(temp_path, level_path)
+        invalidate_world_snapshot(level_path)
     if "technology_points" in changes:
         player_path, player_gvas, _ = load_player_gvas(world_path, player_uid)
         if expected_player_sha256 and sha256(player_path) != expected_player_sha256:
@@ -488,6 +553,7 @@ def update_user(world_path: Path, player_uid: str, changes: dict[str, object], e
             raise ValueError("当前玩家文件没有 TechnologyPoint 字段")
         set_value(player_save["TechnologyPoint"], validators["technology_points"](changes["technology_points"]))
         _write_player(player_path, player_gvas)
+        invalidate_world_snapshot(level_path)
     result = list_users(world_path)
     result["backup_path"] = str(backup_root)
     return result

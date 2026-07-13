@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 UPSTREAM_REPOSITORY = "https://github.com/zaigie/palworld-server-tool"
-UPSTREAM_COMMIT = "18df587bd9e62d0f890b8cef1c32985fa6e9ba39"
+UPSTREAM_COMMIT = "7df5ec40c5d3f3ef50200f2048dc116a0b9938bf"
 UPSTREAM_FILES = {
     "items": "web/src/assets/items.json",
     "item_icons": "web/src/assets/items",
@@ -73,12 +73,9 @@ def validate_source(source: Path) -> str:
 def sync_managed_assets(source: Path, destination: Path, suffix: str) -> int:
     destination.mkdir(parents=True, exist_ok=True)
     source_files = {path.name: path for path in source.iterdir() if path.suffix == suffix}
-    for stale in destination.iterdir():
-        if stale.is_file() and stale.suffix == suffix and stale.name not in source_files:
-            stale.unlink()
     for name, path in source_files.items():
         shutil.copy2(path, destination / name)
-    return len(source_files)
+    return sum(1 for path in destination.iterdir() if path.suffix == suffix)
 
 
 def merge_items(repo_root: Path, source: Path, generated_at: str) -> dict[str, Any]:
@@ -134,7 +131,11 @@ def merge_pals(repo_root: Path, source: Path, generated_at: str) -> dict[str, An
         existing = current_rows.get(character_id, {})
         name = str(existing.get("name_zh") or upstream_name)
         icon_name = f"{character_id.casefold()}.png"
-        icon_url = f"/assets/catalog/pals/{icon_name}" if icon_name in upstream_icon_names else ""
+        icon_url = (
+            f"/assets/catalog/pals/{icon_name}"
+            if icon_name in upstream_icon_names
+            else str(existing.get("icon_url") or "")
+        )
         pals.append(
             {
                 "character_id": character_id,
@@ -168,15 +169,19 @@ def merge_pals(repo_root: Path, source: Path, generated_at: str) -> dict[str, An
 
 
 def build_skills(repo_root: Path, source: Path, generated_at: str) -> dict[str, Any]:
+    target = repo_root / "src/paledit/data/skills_zh_cn.json"
+    current = read_json(target)
+    current_rows = {str(row["skill_id"]): row for row in current["skills"]}
     upstream_rows: dict[str, dict[str, str]] = read_json(source / UPSTREAM_FILES["skills"])["zh"]
-    skills = [
-        {
+    skills = []
+    for skill_id in sorted(set(current_rows) | set(upstream_rows), key=str.casefold):
+        upstream = upstream_rows.get(skill_id)
+        existing = current_rows.get(skill_id, {})
+        skills.append({
             "skill_id": skill_id,
-            "name_zh": row["name"],
-            "description": row.get("desc", ""),
-        }
-        for skill_id, row in sorted(upstream_rows.items(), key=lambda pair: pair[0].casefold())
-    ]
+            "name_zh": str((upstream or {}).get("name") or existing.get("name_zh") or skill_id),
+            "description": str((upstream or {}).get("desc") or existing.get("description") or ""),
+        })
     payload = {
         "schema_version": 1,
         "source": {
@@ -189,7 +194,7 @@ def build_skills(repo_root: Path, source: Path, generated_at: str) -> dict[str, 
         "skill_count": len(skills),
         "skills": skills,
     }
-    write_json(repo_root / "src/paledit/data/skills_zh_cn.json", payload)
+    write_json(target, payload)
     return payload
 
 

@@ -9,14 +9,16 @@ from .backups import delete_backup, list_backups, prepare_backup_restore, restor
 from .items import get_item, search_items
 from .map import get_map_config
 from .pals import search_pals
-from .parser import load_character_data
+from .parser import PARSER_REVISION, invalidate_world_snapshot, load_character_data, parser_capabilities
 from .remote import (
     get_server_config, get_server_metrics, get_server_status, list_online_players, prepare_server_restart,
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
-from .save import InvalidSaveError, discover_worlds, sha256
+from .save import InvalidSaveError, discover_worlds
 from .skills import search_skills
-from .world import list_guilds, list_storage_containers, list_users, update_inventory_slot, update_user
+from .world import (
+    list_guilds, list_storage_containers, list_users, update_inventory_slot, update_user, world_snapshot_payload,
+)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
@@ -72,7 +74,9 @@ def worlds(root: str = Query(default=str(DEFAULT_SAVE_ROOT))) -> dict[str, objec
 @app.post("/api/save/pull")
 def pull_save() -> dict[str, object]:
     try:
-        return pull_latest_save(DEFAULT_SAVE_ROOT)
+        result = pull_latest_save(DEFAULT_SAVE_ROOT)
+        invalidate_world_snapshot()
+        return result
     except (InvalidSaveError, OSError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
@@ -102,10 +106,12 @@ def backup_restore(payload: dict = Body(...)) -> dict[str, object]:
     try:
         if payload.get("confirmed") is not True:
             raise ValueError("请完成备份恢复确认")
-        return restore_backup(
+        result = restore_backup(
             str(payload["backup_id"]), str(payload["world_id"]), str(payload["expected_sha256"]),
             DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT,
         )
+        invalidate_world_snapshot()
+        return result
     except (KeyError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:
@@ -214,12 +220,23 @@ def inspect_world(path: str) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=f"1.0 存档解析失败：{error}") from error
     return {
         "world_id": world.name,
-        "level_sha256": sha256(level),
+        "level_sha256": parsed["level_sha256"],
         "character_count": parsed["character_count"],
         "world_property_count": parsed["world_property_count"],
+        "parser_revision": PARSER_REVISION,
+        "capabilities": parser_capabilities(),
+        "warnings": ["MapObject 使用原始字节扫描回退；未知结构保持不透明。"],
         "write_enabled": True,
         "compatibility": "Palworld 1.0 PlM 读取 / Pal 支持的 PlZ 安全写入",
     }
+
+
+@app.get("/api/world/snapshot")
+def world_snapshot(path: str) -> dict[str, object]:
+    try:
+        return world_snapshot_payload(Path(path))
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"读取世界快照失败：{error}") from error
 
 
 @app.get("/api/world/users")

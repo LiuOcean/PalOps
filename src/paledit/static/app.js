@@ -43,23 +43,76 @@ let mapRequest = null;
 const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
 let serverConfig = null;
 let backupData = null;
+let selectedBackupId = null;
 let pendingBackupRestore = null;
 let pendingBackupDelete = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 let serverContextRequest = null;
+const ROUTES = {
+  overview: {page:'overview', root:'overview'},
+  'world/containers': {page:'saves', root:'world', resource:'containers'},
+  'world/players': {page:'saves', root:'world', resource:'users'},
+  'world/guilds': {page:'saves', root:'world', resource:'guilds'},
+  'world/backups': {page:'backups', root:'world'},
+  map: {page:'map', root:'map'},
+  'manage/players': {page:'players', root:'manage'},
+  'manage/rules': {page:'config', root:'manage'},
+  'manage/operations': {page:'operations', root:'manage'},
+  'catalog/items': {page:'data', root:'catalog', catalog:'items'},
+  'catalog/pals': {page:'data', root:'catalog', catalog:'pals'},
+  'catalog/skills': {page:'data', root:'catalog', catalog:'skills'},
+};
+const LEGACY_ROUTES = {
+  overview:'overview', saves:'world/containers', backups:'world/backups', map:'map',
+  players:'manage/players', config:'manage/rules', operations:'manage/operations', data:'catalog/items',
+};
 
 function playersFromResponse(payload) {
   return Array.isArray(payload?.players) ? payload.players : [];
 }
 
+function currentRoute() {
+  const route = location.hash.replace(/^#\/?/, '');
+  return ROUTES[route] ? route : 'world/containers';
+}
+
+function navigate(route) {
+  const target = ROUTES[route] ? route : (LEGACY_ROUTES[route] || 'world/containers');
+  if (currentRoute() === target && location.hash) applyRoute(target);
+  else location.hash = `#/${target}`;
+}
+
+function applyRoute(route = currentRoute()) {
+  const state = ROUTES[route];
+  document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== state.page));
+  document.querySelectorAll('[data-nav-root]').forEach(button => {
+    const active = button.dataset.navRoot === state.root;
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.section-nav [data-route]').forEach(button => {
+    const active = button.dataset.route === route;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  if (state.resource) showResourceTab(state.resource, {fromRoute:true});
+  if (state.catalog) document.querySelectorAll('[data-catalog-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.catalogPane !== state.catalog));
+  document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open');
+  document.querySelector('.app-shell').scrollTo({top:0});
+  if (state.page === 'config' && !serverConfig) loadServerConfig();
+  if (state.page === 'backups' && !backupData) loadBackups();
+  if (state.page === 'map') loadWorldMap();
+}
+
 function showView(name) {
-  document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
-  document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
-  if (name === 'config' && !serverConfig) loadServerConfig();
-  if (name === 'backups' && !backupData) loadBackups();
-  if (name === 'map') loadWorldMap();
+  navigate(LEGACY_ROUTES[name] || name);
+}
+
+function showModalWithFocus(dialog, opener = document.activeElement) {
+  dialog.showModal();
+  dialog.addEventListener('close', () => opener?.focus(), {once:true});
 }
 
 function formatBytes(bytes) {
@@ -87,8 +140,15 @@ function renderBackups() {
   const source = document.querySelector('#backup-source').value;
   const rows = (backupData?.backups || []).filter(backup => (!source || backup.source === source) && (!query || backupSearchText(backup).includes(query)));
   root.innerHTML = '';
+  let currentDay = '';
   for (const backup of rows) {
-    const article = document.createElement('article'); article.className = 'backup-row';
+    const day = new Date(backup.created_at).toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric'});
+    if (day !== currentDay) {
+      const heading = document.createElement('h3'); heading.className = 'backup-group-label'; heading.textContent = day;
+      root.append(heading); currentDay = day;
+    }
+    const article = document.createElement('button'); article.type = 'button'; article.className = 'backup-row';
+    article.dataset.backupId = backup.backup_id;
     const icon = document.createElement('span'); icon.className = `backup-icon ${backup.source}`; icon.innerHTML = '<i class="ph ph-archive-box" aria-hidden="true"></i>';
     const copy = document.createElement('span'); copy.className = 'backup-copy';
     const title = document.createElement('strong'); title.textContent = backup.name;
@@ -101,34 +161,70 @@ function renderBackups() {
     const size = document.createElement('strong'); size.textContent = formatBytes(backup.size_bytes);
     const files = document.createElement('small'); files.textContent = `${backup.file_count.toLocaleString()} 个文件${backup.has_level_save ? ' · 含 Level.sav' : ''}${backup.protected ? ' · 24 小时保护中' : ''}`;
     stats.append(size, files);
-    const technical = document.createElement('details'); technical.className = 'backup-path';
-    const summary = document.createElement('summary'); summary.textContent = '查看路径';
-    const code = document.createElement('code'); code.textContent = backup.path;
-    technical.append(summary, code);
-    const actions = document.createElement('span'); actions.className = 'backup-actions';
-    let worldSelect = null;
-    if ((backup.world_ids || []).length > 1) {
-      worldSelect = document.createElement('select'); worldSelect.setAttribute('aria-label', `${backup.name} 恢复世界`);
-      for (const worldId of backup.world_ids) {
-        const option = document.createElement('option'); option.value = worldId; option.textContent = worldId; worldSelect.append(option);
-      }
-      actions.append(worldSelect);
-    }
-    const restore = document.createElement('button'); restore.className = 'backup-restore secondary';
-    restore.innerHTML = '<i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> 恢复';
-    restore.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
-    restore.title = restore.disabled ? '该备份中没有可恢复的世界' : '检查后恢复到本地 Save';
-    restore.addEventListener('click', () => beginBackupRestore(backup, worldSelect?.value || backup.world_ids[0], restore));
-    const remove = document.createElement('button'); remove.className = 'backup-delete danger';
-    remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i> 删除';
-    remove.disabled = !backup.deletable;
-    remove.title = backup.protected ? `安全快照保护至 ${new Date(backup.protected_until).toLocaleString('zh-CN', {hour12:false})}` : '永久删除这份本地备份';
-    remove.addEventListener('click', () => beginBackupDelete(backup));
-    actions.append(restore, remove, technical);
-    article.append(icon, copy, sourceBadge, stats, actions); root.append(article);
+    article.append(icon, copy, sourceBadge, stats);
+    article.classList.toggle('active', backup.backup_id === selectedBackupId);
+    article.setAttribute('aria-selected', String(backup.backup_id === selectedBackupId));
+    article.addEventListener('click', () => selectBackup(backup.backup_id));
+    root.append(article);
   }
   document.querySelector('#backup-summary').textContent = `显示 ${rows.length} / ${backupData?.count || 0} 份备份 · 固定目录只读扫描`;
-  if (!rows.length) root.innerHTML = '<div class="empty">没有匹配的本地备份</div>';
+  if (!rows.length) {
+    root.innerHTML = '<div class="empty">没有匹配的本地备份</div>';
+    renderBackupDetail(null);
+  } else {
+    if (!rows.some(backup => backup.backup_id === selectedBackupId)) selectedBackupId = rows[0].backup_id;
+    selectBackup(selectedBackupId);
+  }
+}
+
+function selectBackup(backupId, {preserveList = false} = {}) {
+  selectedBackupId = backupId;
+  if (!preserveList) document.querySelectorAll('.backup-row').forEach(row => {
+    const active = row.dataset.backupId === backupId;
+    row.classList.toggle('active', active); row.setAttribute('aria-selected', String(active));
+  });
+  renderBackupDetail((backupData?.backups || []).find(backup => backup.backup_id === backupId));
+}
+
+function renderBackupDetail(backup) {
+  const root = document.querySelector('#backup-detail');
+  root.innerHTML = '';
+  if (!backup) {
+    root.innerHTML = '<div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>恢复、删除和技术路径集中显示在这里。</p></div>';
+    return;
+  }
+  const article = document.createElement('article'); article.className = 'backup-detail-card';
+  article.innerHTML = '<header><span class="backup-icon"><i class="ph ph-archive-box" aria-hidden="true"></i></span><div><p class="eyebrow">选中备份</p><h2></h2><span class="backup-source"></span></div></header><dl class="backup-detail-facts"></dl>';
+  article.querySelector('.backup-icon').classList.add(backup.source);
+  article.querySelector('h2').textContent = backup.name;
+  const source = article.querySelector('.backup-source'); source.classList.add(backup.source); source.textContent = backup.source_label;
+  const facts = article.querySelector('dl');
+  const values = [
+    ['创建时间', new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false})],
+    ['占用空间', `${formatBytes(backup.size_bytes)} · ${backup.file_count.toLocaleString()} 个文件`],
+    ['世界', backup.world_ids?.join(', ') || '未识别世界'],
+    ['安全状态', backup.protected ? `保护至 ${new Date(backup.protected_until).toLocaleString('zh-CN', {hour12:false})}` : '可按确认链操作'],
+  ];
+  for (const [label, value] of values) {
+    const row = document.createElement('div'); const dt = document.createElement('dt'); const dd = document.createElement('dd');
+    dt.textContent = label; dd.textContent = value; row.append(dt, dd); facts.append(row);
+  }
+  const path = document.createElement('details'); path.className = 'technical-info';
+  path.innerHTML = '<summary>查看技术路径</summary><code></code>'; path.querySelector('code').textContent = backup.path;
+  const actions = document.createElement('div'); actions.className = 'backup-detail-actions';
+  let worldSelect = null;
+  if ((backup.world_ids || []).length > 1) {
+    worldSelect = document.createElement('select'); worldSelect.setAttribute('aria-label', `${backup.name} 恢复世界`);
+    for (const worldId of backup.world_ids) { const option = document.createElement('option'); option.value = worldId; option.textContent = worldId; worldSelect.append(option); }
+    actions.append(worldSelect);
+  }
+  const restore = document.createElement('button'); restore.className = 'backup-restore primary'; restore.innerHTML = '<i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> 检查并恢复';
+  restore.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
+  restore.addEventListener('click', () => beginBackupRestore(backup, worldSelect?.value || backup.world_ids[0], restore));
+  const remove = document.createElement('button'); remove.className = 'backup-delete danger'; remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i> 永久删除';
+  remove.disabled = !backup.deletable; remove.title = backup.protected ? '安全快照仍在保护期内' : '永久删除这份本地备份';
+  remove.addEventListener('click', () => beginBackupDelete(backup));
+  actions.append(restore, remove); article.append(path, actions); root.append(article);
 }
 
 async function loadBackups() {
@@ -144,6 +240,8 @@ async function loadBackups() {
     document.querySelector('#backup-total').textContent = data.count.toLocaleString();
     document.querySelector('#backup-size').textContent = formatBytes(data.total_size_bytes);
     document.querySelector('#backup-review').textContent = `${data.retention.review_count.toLocaleString()} 份`;
+    const latest = data.backups?.[0];
+    document.querySelector('#overview-last-backup').textContent = latest ? new Date(latest.created_at).toLocaleString('zh-CN', {hour12:false}) : '尚无备份';
     renderBackups();
   } catch (error) {
     root.innerHTML = '<div class="empty"></div>';
@@ -166,7 +264,7 @@ async function beginBackupRestore(backup, worldId, button) {
     document.querySelector('#restore-backup-hash').textContent = data.backup_sha256;
     const checkbox = document.querySelector('#backup-restore-confirm'); checkbox.checked = false;
     document.querySelector('#confirm-backup-restore').disabled = true;
-    document.querySelector('#backup-restore-dialog').showModal();
+    showModalWithFocus(document.querySelector('#backup-restore-dialog'), button);
     setBackupResult('备份检查通过，请在弹窗中完成第二次确认。');
   } catch (error) {
     pendingBackupRestore = null;
@@ -182,12 +280,17 @@ function beginBackupDelete(backup) {
   document.querySelector('#delete-backup-size').textContent = formatBytes(backup.size_bytes);
   const checkbox = document.querySelector('#backup-delete-confirm'); checkbox.checked = false;
   document.querySelector('#confirm-backup-delete').disabled = true;
-  document.querySelector('#backup-delete-dialog').showModal();
+  showModalWithFocus(document.querySelector('#backup-delete-dialog'));
 }
 
-function showResourceTab(name) {
+function showResourceTab(name, {fromRoute = false} = {}) {
+  if (!fromRoute) {
+    const route = {containers:'world/containers', users:'world/players', guilds:'world/guilds'}[name];
+    if (route && currentRoute() !== route) { navigate(route); return; }
+  }
   document.querySelectorAll('[data-resource-tab]').forEach(button => {
     const active = button.dataset.resourceTab === name;
+    button.setAttribute('role', 'tab');
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
@@ -201,6 +304,10 @@ function showResourceTab(name) {
   if (name === 'containers' && hasData) selectContainer(selectedContainerId || loadedContainers[0].container_id);
   if (name === 'users' && hasData) selectUser(selectedUserId || loadedUsers[0].player_uid);
   if (name === 'guilds' && hasData) selectGuild(selectedGuildId || loadedGuilds[0].guild_id);
+}
+
+function openMobileWorldDetail() {
+  document.querySelector('.world-workspace')?.classList.add('mobile-detail-open');
 }
 
 function setConfigResult(message, kind = '') {
@@ -227,21 +334,33 @@ function syncConfigChanges() {
   });
   const count = Object.keys(configChanges()).length;
   document.querySelector('#save-config').disabled = count === 0;
+  document.querySelector('#save-config').textContent = count ? `备份并保存 · ${count} 项` : '备份并保存';
   if (count) setConfigResult(`${count} 项待保存。保存后需重启服务器才会应用。`);
+}
+
+function configExperienceGroup(setting) {
+  const key = setting.key;
+  if (['PUID','PGID','TZ','ARM64_DEVICE','MULTITHREADING','UPDATE_ON_BOOT','USE_DEPOT_DOWNLOADER'].includes(key)) return '高级';
+  if (key.includes('PORT') || key.includes('RCON') || key.includes('REST_API') || ['SERVER_NAME','SERVER_DESCRIPTION','COMMUNITY','CROSSPLAY_PLATFORMS','PLAYERS'].includes(key)) return '连接';
+  if (key.includes('BACKUP') || key.includes('UPDATE') || key.includes('DEPOT') || key.includes('DIRTY_INTERVAL')) return '备份维护';
+  if (key.includes('BASE_CAMP') || key.includes('GUILD') || key.includes('PALBOX') || key.includes('BUILD_OBJECT')) return '世界与据点';
+  return '游戏体验';
 }
 
 function renderServerConfig() {
   const root = document.querySelector('#config-settings');
   const query = document.querySelector('#config-query').value.trim().toLocaleLowerCase('zh-CN');
   root.innerHTML = '';
-  const categories = new Map();
+  const categories = new Map(['游戏体验','世界与据点','备份维护','连接','高级'].map(name => [name, []]));
   for (const setting of serverConfig.settings) {
     if (query && !`${setting.label} ${setting.description} ${setting.key} ${setting.value} ${setting.category}`.toLocaleLowerCase('zh-CN').includes(query)) continue;
-    if (!categories.has(setting.category)) categories.set(setting.category, []);
-    categories.get(setting.category).push(setting);
+    categories.get(configExperienceGroup(setting)).push(setting);
   }
   for (const [category, settings] of categories) {
-    const heading = document.createElement('h3'); heading.className = 'config-group-title'; heading.textContent = category; root.append(heading);
+    if (!settings.length) continue;
+    const group = document.createElement('details'); group.className = 'config-group'; group.open = category !== '高级' || Boolean(query);
+    const heading = document.createElement('summary'); heading.className = 'config-group-title'; heading.innerHTML = `<span>${category}</span><small>${settings.length} 项</small>`;
+    const body = document.createElement('div'); body.className = 'config-group-body'; group.append(heading, body); root.append(group);
     for (const setting of settings) {
       const row = document.createElement('label'); row.className = 'config-row';
       const key = document.createElement('span'); key.className = 'config-key';
@@ -266,7 +385,7 @@ function renderServerConfig() {
       }
       control.dataset.configControl = ''; control.dataset.original = setting.value; control.dataset.key = setting.key;
       const state = document.createElement('span'); state.className = 'change-state'; state.textContent = '未修改';
-      row.append(key, control, state); root.append(row);
+      row.append(key, control, state); body.append(row);
     }
   }
   if (!root.children.length) root.innerHTML = '<div class="empty">没有匹配的配置项</div>';
@@ -321,7 +440,10 @@ function exportServerConfig() {
 
 function showOperationTab(name) {
   document.querySelectorAll('[data-operation-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.operationPane !== name));
-  document.querySelectorAll('[data-operation-tab]').forEach(button => button.classList.toggle('active', button.dataset.operationTab === name));
+  document.querySelectorAll('[data-operation-tab]').forEach(button => {
+    const active = button.dataset.operationTab === name;
+    button.setAttribute('role', 'tab'); button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active));
+  });
 }
 
 function setOperationResult(message, kind = '') {
@@ -418,6 +540,7 @@ function loadServerContext({showLoading = true} = {}) {
       document.querySelector('#overview-health-icon').classList.toggle('offline', !status.online);
       rcon.className = 'connection-state'; rcon.textContent = 'RCON 已连接';
       onlinePlayers = playersFromResponse(playerData);
+      document.querySelector('#overview-attention').textContent = status.online ? (onlinePlayers.length ? `${onlinePlayers.length} 名玩家在线` : '无需介入') : '服务器离线';
       renderOnlinePlayers();
       renderServerMetrics(metricsResponse.ok ? metricsData : null, metricsData.detail);
       if (mapData) {
@@ -432,6 +555,7 @@ function loadServerContext({showLoading = true} = {}) {
       document.querySelector('#overview-state-title').textContent = '服务器状态不可用';
       document.querySelector('#overview-state-copy').textContent = error.message;
       document.querySelector('#overview-health-icon').classList.add('offline');
+      document.querySelector('#overview-attention').textContent = '管理链路不可用';
       renderServerMetrics(null, error.message);
       document.querySelector('#online-players').textContent = error.message;
       document.querySelector('#players-page-list').textContent = error.message;
@@ -519,9 +643,18 @@ async function scan() {
     discoveredWorlds = data.worlds;
     if (!activeWorld && discoveredWorlds.length === 1) activeWorld = discoveredWorlds[0].path;
     rootNode.textContent = data.root;
+    const latestWorld = [...data.worlds].sort((a, b) => b.level.modified_at - a.level.modified_at)[0];
+    document.querySelector('#overview-save-freshness').textContent = latestWorld ? new Date(latestWorld.level.modified_at * 1000).toLocaleString('zh-CN', {hour12:false}) : '未发现存档';
+    document.querySelector('#overview-parser-state').textContent = latestWorld?.level.magic === 'PlM' ? 'Palworld 1.0 安全模式' : '等待兼容诊断';
     worldsNode.innerHTML = '';
     for (const world of data.worlds) worldsNode.append(renderWorld(world));
     if (!data.worlds.length) worldsNode.innerHTML = '<div class="empty">没有发现 Level.sav</div>';
+    if (
+      data.worlds.length === 1
+      && currentRoute().startsWith('world/')
+      && currentRoute() !== 'world/backups'
+      && !loadedContainers.length
+    ) worldsNode.querySelector('.inspect')?.click();
     if (!document.querySelector('[data-page="map"]').classList.contains('hidden')) loadWorldMap();
   } catch (error) {
     worldsNode.innerHTML = `<div class="empty">${error.message}</div>`;
@@ -541,22 +674,59 @@ function renderWorld(world) {
     button.disabled = true;
     result.className = 'result'; result.textContent = '正在解压并遍历 1.0 数据…';
     try {
-      const response = await fetch(`/api/world/inspect?path=${encodeURIComponent(world.path)}`);
+      const response = await fetch(`/api/world/snapshot?path=${encodeURIComponent(world.path)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || '诊断失败');
       result.className = 'result ok';
-      result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可编辑用户与道具`;
+      result.textContent = `兼容 · ${data.summary.character_count} 个角色实体 · ${data.warnings.length} 项安全提示`;
       button.textContent = '重新诊断';
       activeWorld = world.path;
       mapData = null;
-      await Promise.all([loadUsers(), loadContainers(), loadGuilds()]);
+      hydrateWorldSnapshot(data);
+      document.querySelector('#overview-parser-state').textContent = `${Object.values(data.capabilities).filter(Boolean).length} 项能力可用`;
+      document.querySelector('#overview-attention').textContent = data.warnings.length ? `${data.warnings.length} 项解析提示` : '无需介入';
       document.querySelector('#resource-empty').classList.add('hidden');
-      showResourceTab('containers');
+      const route = currentRoute();
+      if (["world/containers", "world/players", "world/guilds"].includes(route)) applyRoute(route);
+      else navigate("world/containers");
     } catch (error) {
       result.className = 'result error'; result.textContent = error.message;
     } finally { button.disabled = false; }
   });
   return node;
+}
+
+function renderUserNavigation() {
+  userPanel.classList.remove('hidden');
+  userSummary.textContent = `${loadedUsers.length} 个用户 · 所有字段以 Palworld 原始类型读写`;
+  usersNode.innerHTML = '';
+  for (const user of loadedUsers) {
+    const button = document.createElement('button');
+    const name = document.createElement('span'); name.textContent = user.nickname || '未命名用户';
+    const meta = document.createElement('small'); meta.textContent = `Lv.${user.level} · ${user.pal_count} 只帕鲁`;
+    if (user.player_uid.toLowerCase() === OWNER_PLAYER_UID) meta.textContent += ' · 我的角色';
+    button.append(name, meta);
+    button.classList.toggle('active', user.player_uid === selectedUserId);
+    button.addEventListener('click', () => selectUser(user.player_uid));
+    usersNode.append(button);
+  }
+  if (!selectedUserId || !loadedUsers.some(user => user.player_uid === selectedUserId)) {
+    selectedUserId = loadedUsers.find(user => user.player_uid.toLowerCase() === OWNER_PLAYER_UID)?.player_uid || loadedUsers[0]?.player_uid;
+  }
+}
+
+function hydrateWorldSnapshot(data) {
+  activeWorldHash = data.level_sha256;
+  loadedContainers = data.containers || [];
+  loadedUsers = data.users || [];
+  loadedGuilds = data.guilds || [];
+  containerPanel.classList.remove('hidden'); guildPanel.classList.remove('hidden');
+  containerSummary.textContent = `${loadedContainers.length} 个物品容器 · ${loadedContainers.filter(row => row.label).length} 个带标签 · 只读展示`;
+  guildSummary.textContent = `${loadedGuilds.length} 个公会 · ${loadedGuilds.reduce((count, row) => count + row.base_count, 0)} 个据点 · 只读展示`;
+  if (!selectedGuildId || !loadedGuilds.some(guild => guild.guild_id === selectedGuildId)) {
+    selectedGuildId = loadedGuilds.find(guild => guild.players.some(player => player.player_uid.toLowerCase() === OWNER_PLAYER_UID))?.guild_id || loadedGuilds[0]?.guild_id;
+  }
+  renderUserNavigation(); renderContainers(); renderGuilds();
 }
 
 async function loadContainers() {
@@ -624,6 +794,7 @@ function selectContainer(containerId) {
     main.append(image, copy); row.append(main, count); items.append(row);
   }
   detailRoot.append(detail);
+  openMobileWorldDetail();
 }
 
 function guildSearchText(guild) {
@@ -707,6 +878,9 @@ function renderGuildDetail(guild) {
     const badges = document.createElement('span'); badges.className = 'guild-member-badges';
     if (member.player_uid === guild.admin_player_uid) { const badge = document.createElement('b'); badge.textContent = '会长'; badges.append(badge); }
     if (member.player_uid.toLowerCase() === OWNER_PLAYER_UID) { const badge = document.createElement('b'); badge.textContent = '我'; badges.append(badge); }
+    if (member.last_online) {
+      const lastOnline = document.createElement('small'); lastOnline.textContent = new Date(member.last_online).toLocaleDateString('zh-CN'); lastOnline.title = `最后在线：${new Date(member.last_online).toLocaleString('zh-CN', {hour12:false})}`; badges.append(lastOnline);
+    }
     const linkedUser = loadedUsers.find(user => user.player_uid === member.player_uid);
     if (linkedUser) {
       const view = document.createElement('button'); view.className = 'icon-button guild-view-player'; view.title = '查看玩家存档'; view.innerHTML = '<i class="ph ph-arrow-right" aria-hidden="true"></i>';
@@ -751,6 +925,7 @@ function selectGuild(guildId) {
   const guild = loadedGuilds.find(row => row.guild_id === guildId);
   guildDetail.innerHTML = '';
   if (guild) guildDetail.append(renderGuildDetail(guild));
+  if (guild) openMobileWorldDetail();
 }
 
 function normalizedPlayerId(value) {
@@ -1200,21 +1375,8 @@ async function loadUsers() {
   const data = await response.json();
   if (!response.ok) { usersNode.innerHTML = `<div class="empty">${data.detail}</div>`; return; }
   activeWorldHash = data.level_sha256;
-  userSummary.textContent = `${data.users.length} 个用户 · 所有字段以 Palworld 原始类型读写`;
   loadedUsers = data.users;
-  usersNode.innerHTML = '';
-  for (const user of data.users) {
-    const button = document.createElement('button');
-    const name = document.createElement('span'); name.textContent = user.nickname || '未命名用户';
-    const meta = document.createElement('small'); meta.textContent = `Lv.${user.level} · ${user.pal_count} 只帕鲁`;
-    button.append(name, meta);
-    button.classList.toggle('active', user.player_uid === selectedUserId);
-    button.addEventListener('click', () => selectUser(user.player_uid));
-    usersNode.append(button);
-  }
-  if (!selectedUserId || !data.users.some(user => user.player_uid === selectedUserId)) {
-    selectedUserId = data.users.find(user => user.player_uid.toLowerCase() === OWNER_PLAYER_UID)?.player_uid || data.users[0]?.player_uid;
-  }
+  renderUserNavigation();
   if (document.querySelector('[data-resource-tab="users"]').classList.contains('active')) selectUser(selectedUserId);
 }
 
@@ -1224,6 +1386,7 @@ function selectUser(playerUid) {
   const user = loadedUsers.find(row => row.player_uid === playerUid);
   playerDetail.innerHTML = '';
   if (user) playerDetail.append(renderUser(user));
+  if (user) openMobileWorldDetail();
 }
 
 const OWNED_PAL_PAGE_SIZE = 40;
@@ -1318,8 +1481,21 @@ function renderUser(user) {
   card.querySelector('.user-name').textContent = user.nickname || '未命名用户';
   card.querySelector('.user-id').textContent = user.player_uid;
   card.querySelector('.pal-count').textContent = `${user.pal_count} 只帕鲁`;
+  card.querySelector('.owner-badge').classList.toggle('hidden', user.player_uid.toLowerCase() !== OWNER_PLAYER_UID);
   const form = card.querySelector('form');
-  for (const field of ['nickname','level','experience','unused_status_points','satiety','technology_points']) form.elements[field].value = user[field] ?? 0;
+  const editableFields = ['nickname','level','experience','unused_status_points','satiety','technology_points'];
+  for (const field of editableFields) form.elements[field].value = user[field] ?? 0;
+  const baseline = Object.fromEntries(editableFields.map(field => [field, String(form.elements[field].value)]));
+  const saveButton = form.querySelector('.save-user');
+  const saveStatus = form.querySelector('.save-result');
+  const changedFields = () => editableFields.filter(field => String(form.elements[field].value) !== baseline[field]);
+  const syncDirty = () => {
+    const count = changedFields().length;
+    saveButton.disabled = count === 0;
+    saveStatus.textContent = count ? `${count} 项待保存` : '尚无变更';
+  };
+  form.addEventListener('input', syncDirty);
+  form.addEventListener('change', syncDirty);
   card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
   renderOwnedPals(card, user);
   const inventoryBox = card.querySelector('.inventory-list');
@@ -1330,7 +1506,9 @@ function renderUser(user) {
     inventoryBox.append(group);
   }
   card.querySelectorAll('.detail-tabs button').forEach(button => button.addEventListener('click', () => {
-    card.querySelectorAll('.detail-tabs button').forEach(node => node.classList.toggle('active', node === button));
+    card.querySelectorAll('.detail-tabs button').forEach(node => {
+      const active = node === button; node.classList.toggle('active', active); node.setAttribute('aria-selected', String(active));
+    });
     card.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('hidden', pane.dataset.pane !== button.dataset.tab));
   }));
   form.addEventListener('submit', async event => {
@@ -1338,14 +1516,16 @@ function renderUser(user) {
     const button = form.querySelector('.save-user'); const status = form.querySelector('.save-result');
     button.disabled = true; status.textContent = '正在备份、写入并重新解析…';
     const body = {expected_sha256: activeWorldHash, expected_player_sha256:user.player_file_sha256};
-    for (const field of ['nickname','level','experience','unused_status_points','satiety','technology_points']) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
+    for (const field of changedFields()) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
+    let saved = false;
     try {
       const response = await fetch(`/api/world/users/${user.player_uid}?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail);
       activeWorldHash = data.level_sha256; backupData = null; status.textContent = `已保存，备份：${data.backup_path}`;
+      saved = true;
       await loadUsers();
     } catch (error) { status.textContent = error.message; }
-    finally { button.disabled = false; }
+    finally { if (!saved) syncDirty(); }
   });
   return card;
 }
@@ -1597,7 +1777,7 @@ function stopMapDrag(event) {
 mapStage.addEventListener('pointerup', stopMapDrag);
 mapStage.addEventListener('pointercancel', stopMapDrag);
 
-document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
+document.querySelectorAll('[data-route]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.route)));
 document.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => {
   showView(button.dataset.jump);
   if (button.dataset.jump === 'operations' && button.closest('[data-page="players"]')) showOperationTab('player');
@@ -1621,7 +1801,7 @@ configRestartButton.addEventListener('click', async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || '无法发起重启确认');
     restartConfirmationToken = data.confirmation_token;
-    restartDialog.showModal();
+    showModalWithFocus(restartDialog, configRestartButton);
     setConfigResult(`请在弹窗中完成第二次确认（${data.expires_in} 秒内有效）。`);
   } catch (error) {
     restartConfirmationToken = null;
@@ -1705,11 +1885,14 @@ document.querySelectorAll('[data-quick-action]').forEach(button => button.addEve
 }));
 
 syncAdvancedForm();
-showView('saves');
+window.addEventListener('hashchange', () => applyRoute());
+document.querySelector('#mobile-world-back').addEventListener('click', () => document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open'));
+if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
 scan();
 loadItems();
 loadPals();
 loadSkills();
+loadBackups();
 loadServerContext();
 window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
 document.addEventListener('visibilitychange', refreshServerContextInBackground);

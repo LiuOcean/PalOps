@@ -6,7 +6,7 @@ from paledit.skills import load_skill_index
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "src/paledit"
 STATIC_ROOT = PACKAGE_ROOT / "static"
-PINNED_COMMIT = "18df587bd9e62d0f890b8cef1c32985fa6e9ba39"
+PINNED_COMMIT = "7df5ec40c5d3f3ef50200f2048dc116a0b9938bf"
 
 
 def asset_path(url: str) -> Path:

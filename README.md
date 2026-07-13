@@ -59,7 +59,7 @@ uv run python tools/sync_pst_catalog.py
 ```
 
 前两步更新 PalDB 基础索引；最后一步从固定提交
-`zaigie/palworld-server-tool@18df587bd9e62d0f890b8cef1c32985fa6e9ba39`
+`zaigie/palworld-server-tool@7df5ec40c5d3f3ef50200f2048dc116a0b9938bf`（v0.12.0）
 合并详细道具说明、完整帕鲁名称、被动技能和本地图标。需要审阅新版本时，先修改
 `tools/sync_pst_catalog.py` 中的固定提交并核对上游数据格式，再运行同步。
 

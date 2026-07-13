@@ -7,6 +7,7 @@ class SaveFileInfo:
     name: str
     path: str
     size: int
+    modified_at: float
     magic: str
     format: str
     save_type: int | None
@@ -36,4 +37,3 @@ def relative_display(path: Path, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
-
