@@ -42,6 +42,8 @@ let selectedMapBaseId = null;
 let mapRequest = null;
 const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
 let serverConfig = null;
+let backupData = null;
+let pendingBackupRestore = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
@@ -55,7 +57,114 @@ function showView(name) {
   document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   if (name === 'config' && !serverConfig) loadServerConfig();
+  if (name === 'backups' && !backupData) loadBackups();
   if (name === 'map') loadWorldMap();
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function backupSearchText(backup) {
+  return [backup.name, backup.source_label, backup.path, ...(backup.world_ids || [])].join(' ').toLocaleLowerCase('zh-CN');
+}
+
+function setBackupResult(message, kind = '') {
+  const node = document.querySelector('#backup-result');
+  node.textContent = message;
+  node.className = `sync-result ${kind}`.trim();
+}
+
+function renderBackups() {
+  const root = document.querySelector('#backup-list');
+  const query = document.querySelector('#backup-query').value.trim().toLocaleLowerCase('zh-CN');
+  const source = document.querySelector('#backup-source').value;
+  const rows = (backupData?.backups || []).filter(backup => (!source || backup.source === source) && (!query || backupSearchText(backup).includes(query)));
+  root.innerHTML = '';
+  for (const backup of rows) {
+    const article = document.createElement('article'); article.className = 'backup-row';
+    const icon = document.createElement('span'); icon.className = `backup-icon ${backup.source}`; icon.innerHTML = '<i class="ph ph-archive-box" aria-hidden="true"></i>';
+    const copy = document.createElement('span'); copy.className = 'backup-copy';
+    const title = document.createElement('strong'); title.textContent = backup.name;
+    const meta = document.createElement('small');
+    const worlds = backup.world_ids?.length ? backup.world_ids.join(', ') : '未识别世界';
+    meta.textContent = `${new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false})} · ${worlds}`;
+    copy.append(title, meta);
+    const sourceBadge = document.createElement('span'); sourceBadge.className = `backup-source ${backup.source}`; sourceBadge.textContent = backup.source_label;
+    const stats = document.createElement('span'); stats.className = 'backup-row-stats';
+    const size = document.createElement('strong'); size.textContent = formatBytes(backup.size_bytes);
+    const files = document.createElement('small'); files.textContent = `${backup.file_count.toLocaleString()} 个文件${backup.has_level_save ? ' · 含 Level.sav' : ''}`;
+    stats.append(size, files);
+    const technical = document.createElement('details'); technical.className = 'backup-path';
+    const summary = document.createElement('summary'); summary.textContent = '查看路径';
+    const code = document.createElement('code'); code.textContent = backup.path;
+    technical.append(summary, code);
+    const actions = document.createElement('span'); actions.className = 'backup-actions';
+    let worldSelect = null;
+    if ((backup.world_ids || []).length > 1) {
+      worldSelect = document.createElement('select'); worldSelect.setAttribute('aria-label', `${backup.name} 恢复世界`);
+      for (const worldId of backup.world_ids) {
+        const option = document.createElement('option'); option.value = worldId; option.textContent = worldId; worldSelect.append(option);
+      }
+      actions.append(worldSelect);
+    }
+    const restore = document.createElement('button'); restore.className = 'backup-restore secondary';
+    restore.innerHTML = '<i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> 恢复';
+    restore.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
+    restore.title = restore.disabled ? '该备份中没有可恢复的世界' : '检查后恢复到本地 Save';
+    restore.addEventListener('click', () => beginBackupRestore(backup, worldSelect?.value || backup.world_ids[0], restore));
+    actions.append(restore, technical);
+    article.append(icon, copy, sourceBadge, stats, actions); root.append(article);
+  }
+  document.querySelector('#backup-summary').textContent = `显示 ${rows.length} / ${backupData?.count || 0} 份备份 · 固定目录只读扫描`;
+  if (!rows.length) root.innerHTML = '<div class="empty">没有匹配的本地备份</div>';
+}
+
+async function loadBackups() {
+  const root = document.querySelector('#backup-list');
+  const button = document.querySelector('#reload-backups');
+  root.innerHTML = '<div class="empty">正在统计备份文件与占用空间…</div>';
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/backups');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '备份索引读取失败');
+    backupData = data;
+    document.querySelector('#backup-total').textContent = data.count.toLocaleString();
+    document.querySelector('#backup-size').textContent = formatBytes(data.total_size_bytes);
+    renderBackups();
+  } catch (error) {
+    root.innerHTML = '<div class="empty"></div>';
+    root.querySelector('.empty').textContent = error.message;
+    document.querySelector('#backup-summary').textContent = '备份索引暂不可用';
+  } finally { button.disabled = false; }
+}
+
+async function beginBackupRestore(backup, worldId, button) {
+  button.disabled = true;
+  setBackupResult(`正在检查 ${backup.name}…`);
+  try {
+    const response = await fetch('/api/backups/restore/prepare', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backup_id:backup.backup_id, world_id:worldId})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '备份恢复检查失败');
+    pendingBackupRestore = data;
+    document.querySelector('#restore-world-id').textContent = data.world_id;
+    document.querySelector('#restore-backup-name').textContent = `${data.backup_name} · ${data.source_label}`;
+    document.querySelector('#restore-current-hash').textContent = data.current_sha256;
+    document.querySelector('#restore-backup-hash').textContent = data.backup_sha256;
+    const checkbox = document.querySelector('#backup-restore-confirm'); checkbox.checked = false;
+    document.querySelector('#confirm-backup-restore').disabled = true;
+    document.querySelector('#backup-restore-dialog').showModal();
+    setBackupResult('备份检查通过，请在弹窗中完成第二次确认。');
+  } catch (error) {
+    pendingBackupRestore = null;
+    setBackupResult(error.message, 'error');
+  } finally { button.disabled = false; }
 }
 
 function showResourceTab(name) {
@@ -1215,7 +1324,7 @@ function renderUser(user) {
     try {
       const response = await fetch(`/api/world/users/${user.player_uid}?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail);
-      activeWorldHash = data.level_sha256; status.textContent = `已保存，备份：${data.backup_path}`;
+      activeWorldHash = data.level_sha256; backupData = null; status.textContent = `已保存，备份：${data.backup_path}`;
       await loadUsers();
     } catch (error) { status.textContent = error.message; }
     finally { button.disabled = false; }
@@ -1241,7 +1350,7 @@ function renderInventorySlot(user, category, slot) {
       const body = {category,slot_index:slot.slot_index,item_id:item.value,count:Number(count.value),expected_sha256:activeWorldHash};
       const response = await fetch(`/api/world/users/${user.player_uid}/inventory?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail);
-      activeWorldHash = data.level_sha256; await loadUsers();
+      activeWorldHash = data.level_sha256; backupData = null; await loadUsers();
     } catch (error) { alert(error.message); }
     finally { save.disabled = false; save.textContent = '保存'; }
   });
@@ -1267,6 +1376,7 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
     loadedContainers = [];
     loadedUsers = [];
     loadedGuilds = [];
+    backupData = null;
     mapData = null;
     selectedMapPlayerId = null;
     selectedMapBaseId = null;
@@ -1376,6 +1486,36 @@ document.querySelector('#reload-containers').addEventListener('click', loadConta
 guildQuery.addEventListener('input', renderGuilds);
 document.querySelector('#reload-guilds').addEventListener('click', loadGuilds);
 document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEventListener('click', () => showResourceTab(button.dataset.resourceTab)));
+document.querySelector('#reload-backups').addEventListener('click', loadBackups);
+document.querySelector('#backup-query').addEventListener('input', renderBackups);
+document.querySelector('#backup-source').addEventListener('change', renderBackups);
+const backupRestoreDialog = document.querySelector('#backup-restore-dialog');
+const backupRestoreConfirm = document.querySelector('#backup-restore-confirm');
+const backupRestoreButton = document.querySelector('#confirm-backup-restore');
+backupRestoreConfirm.addEventListener('change', () => { backupRestoreButton.disabled = !backupRestoreConfirm.checked; });
+backupRestoreDialog.addEventListener('close', async () => {
+  if (backupRestoreDialog.returnValue !== 'confirm') {
+    pendingBackupRestore = null;
+    setBackupResult('已取消恢复，本地世界未受影响。');
+    return;
+  }
+  const pending = pendingBackupRestore; pendingBackupRestore = null;
+  if (!pending) { setBackupResult('恢复确认已失效，请重新检查备份。', 'error'); return; }
+  setBackupResult('正在备份当前世界并执行原子恢复…');
+  try {
+    const response = await fetch('/api/backups/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backup_id:pending.backup_id, world_id:pending.world_id, expected_sha256:pending.current_sha256, confirmed:true})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '备份恢复失败');
+    backupData = null; activeWorldHash = null; mapData = null;
+    await Promise.all([loadBackups(), scan()]);
+    setBackupResult(`恢复完成 · 当前世界的恢复前快照：${data.safety_backup_path}`, 'ok');
+  } catch (error) {
+    setBackupResult(error.message, 'error');
+  } finally {
+    backupRestoreConfirm.checked = false;
+    backupRestoreButton.disabled = true;
+  }
+});
 
 document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });
 document.querySelector('#show-map-players').addEventListener('change', event => document.querySelector('#map-player-layer').classList.toggle('hidden', !event.target.checked));

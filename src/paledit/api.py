@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .backups import list_backups, prepare_backup_restore, restore_backup
 from .items import get_item, search_items
 from .map import get_map_config
 from .pals import search_pals
@@ -20,6 +21,7 @@ from .world import list_guilds, list_storage_containers, list_users, update_inve
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
 DEFAULT_SAVE_ROOT = Path.cwd() / "Save"
+DEFAULT_SYNC_BACKUP_ROOT = Path.cwd() / ".paledit-backups"
 
 app = FastAPI(title="PalEdit", version=__version__)
 app.mount("/assets", StaticFiles(directory=STATIC_ROOT), name="assets")
@@ -73,6 +75,41 @@ def pull_save() -> dict[str, object]:
         return pull_latest_save(DEFAULT_SAVE_ROOT)
     except (InvalidSaveError, OSError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/backups")
+def backups() -> dict[str, object]:
+    try:
+        return list_backups(DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT)
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"读取本地备份失败：{error}") from error
+
+
+@app.post("/api/backups/restore/prepare")
+def backup_restore_prepare(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        return prepare_backup_restore(
+            str(payload["backup_id"]), str(payload["world_id"]), DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT,
+        )
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"检查备份失败：{error}") from error
+
+
+@app.post("/api/backups/restore")
+def backup_restore(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        if payload.get("confirmed") is not True:
+            raise ValueError("请完成备份恢复确认")
+        return restore_backup(
+            str(payload["backup_id"]), str(payload["world_id"]), str(payload["expected_sha256"]),
+            DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT,
+        )
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"恢复备份失败：{error}") from error
 
 
 @app.get("/api/server/status")
