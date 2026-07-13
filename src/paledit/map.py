@@ -31,5 +31,7 @@ def get_map_config() -> dict[str, object]:
         "landscape": LANDSCAPE,
         "fast_travel": points["fast_travel"],
         "fast_travel_count": len(points["fast_travel"]),
+        "boss_tower": points["boss_tower"],
+        "boss_tower_count": len(points["boss_tower"]),
         "player_position_source": "Palworld REST /v1/api/players",
     }

@@ -38,6 +38,7 @@ let selectedGuildId = null;
 let discoveredWorlds = [];
 let mapData = null;
 let selectedMapPlayerId = null;
+let selectedMapBaseId = null;
 let mapRequest = null;
 const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
 let serverConfig = null;
@@ -258,6 +259,7 @@ function loadServerContext({showLoading = true} = {}) {
         syncMapPlayersFromServer(onlinePlayers);
         renderMapPlayers();
         if (selectedMapPlayerId) renderMapPlayerDetail(selectedMapPlayerId);
+        renderMapFocusResults();
       }
     } catch (error) {
       state.className = 'status-pill offline'; state.textContent = '不可用';
@@ -608,16 +610,40 @@ function serverPlayersForMap(players) {
   });
 }
 
+function guildBasesForMap(guilds) {
+  return guilds.flatMap(guild => (guild.base_camps || []).map((base, index) => ({
+    ...base,
+    guild_id: guild.guild_id,
+    guild_name: guild.display_name,
+    guild_level: guild.base_camp_level,
+    guild_member_count: guild.member_count,
+    guild_admin_player_uid: guild.admin_player_uid,
+    guild_member_names: (guild.players || []).map(player => player.nickname).filter(Boolean),
+    base_index: index + 1,
+    is_owner_guild: (guild.players || []).some(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(OWNER_PLAYER_UID)),
+  })));
+}
+
+function syncMapSummary() {
+  if (!mapData) return;
+  document.querySelector('#map-player-count').textContent = mapData.mappable_player_count;
+  document.querySelector('#base-camp-count').textContent = mapData.base_camps.length;
+  document.querySelector('#fast-travel-count').textContent = mapData.fast_travel_count;
+  document.querySelector('#boss-tower-count').textContent = mapData.boss_tower_count;
+  const snapshot = new Date(mapData.captured_at * 1000).toLocaleTimeString('zh-CN', {hour12:false});
+  document.querySelector('#map-snapshot').textContent = `玩家实时 · ${snapshot} · 据点存档快照`;
+  const result = document.querySelector('#map-result');
+  const guildNote = mapData.guild_warning ? ` · ${mapData.guild_warning}` : ` · ${mapData.base_camps.length} 个存档据点`;
+  result.textContent = `${mapData.mappable_player_count} 名在线玩家${guildNote} · ${mapData.fast_travel_count} 个传送点 · ${mapData.boss_tower_count} 座塔主塔`;
+  result.className = mapData.guild_warning ? 'sync-result' : 'sync-result ok';
+}
+
 function syncMapPlayersFromServer(players) {
   if (!mapData) return;
   mapData.players = serverPlayersForMap(players);
   mapData.mappable_player_count = mapData.players.length;
   mapData.captured_at = Date.now() / 1000;
-  document.querySelector('#map-player-count').textContent = mapData.mappable_player_count;
-  document.querySelector('#map-snapshot').textContent = `服务器实时 · ${new Date(mapData.captured_at * 1000).toLocaleTimeString('zh-CN', {hour12:false})}`;
-  const result = document.querySelector('#map-result');
-  result.textContent = `${mapData.mappable_player_count} 名在线玩家位置 · ${mapData.fast_travel_count} 个传送点 · 坐标来自服务器 REST 接口`;
-  result.className = 'sync-result ok';
+  syncMapSummary();
 }
 
 function updateMapPlayerPositions() {
@@ -668,6 +694,60 @@ function renderFastTravelMarkers() {
   });
   layer.append(fragment);
   layer.classList.toggle('hidden', !document.querySelector('#show-fast-travel').checked);
+}
+
+function renderBossTowerMarkers() {
+  const layer = document.querySelector('#boss-tower-layer');
+  layer.innerHTML = '';
+  if (!mapData) return;
+  const fragment = document.createDocumentFragment();
+  mapData.boss_tower.forEach(([x, y], index) => {
+    const position = mapPosition({x, y});
+    const marker = document.createElement('span');
+    marker.className = 'boss-tower-marker';
+    marker.style.left = `${position.left}%`;
+    marker.style.top = `${position.top}%`;
+    marker.innerHTML = '<i class="ph ph-crown" aria-hidden="true"></i>';
+    marker.title = `塔主塔 ${index + 1} · X ${Math.round(x).toLocaleString()} · Y ${Math.round(y).toLocaleString()}`;
+    marker.setAttribute('aria-label', marker.title);
+    fragment.append(marker);
+  });
+  layer.append(fragment);
+  layer.classList.toggle('hidden', !document.querySelector('#show-boss-towers').checked);
+}
+
+function renderBaseCampMarkers() {
+  const layer = document.querySelector('#base-camp-layer');
+  layer.innerHTML = '';
+  if (!mapData) return;
+  const xSpan = mapData.landscape.max_x - mapData.landscape.min_x;
+  const ySpan = mapData.landscape.max_y - mapData.landscape.min_y;
+  const fragment = document.createDocumentFragment();
+  for (const base of mapData.base_camps) {
+    const position = mapPosition(base.location);
+    const range = document.createElement('span');
+    range.className = `map-base-range${base.is_owner_guild ? ' owner' : ''}`;
+    range.style.left = `${position.left}%`;
+    range.style.top = `${position.top}%`;
+    range.style.width = `${(base.area_range * 2 / ySpan) * 100}%`;
+    range.style.height = `${(base.area_range * 2 / xSpan) * 100}%`;
+
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = `map-base-marker${base.is_owner_guild ? ' owner' : ''}`;
+    marker.classList.toggle('active', base.base_id === selectedMapBaseId);
+    marker.style.left = `${position.left}%`;
+    marker.style.top = `${position.top}%`;
+    marker.title = `${base.guild_name} · 据点 ${base.base_index} · 范围 ${Math.round(base.area_range).toLocaleString()}`;
+    const pin = document.createElement('span'); pin.className = 'map-base-pin'; pin.innerHTML = '<i class="ph ph-buildings" aria-hidden="true"></i>';
+    const label = document.createElement('span'); label.className = 'map-base-label'; label.textContent = base.guild_name;
+    marker.append(pin, label);
+    marker.addEventListener('pointerdown', event => event.stopPropagation());
+    marker.addEventListener('click', event => { event.stopPropagation(); selectMapBase(base.base_id); });
+    fragment.append(range, marker);
+  }
+  layer.append(fragment);
+  layer.classList.toggle('hidden', !document.querySelector('#show-base-camps').checked);
 }
 
 function playerFanout(players) {
@@ -734,7 +814,7 @@ function renderMapPlayerDetail(playerUid) {
   const player = mapData?.players.find(row => normalizedPlayerId(row.player_uid) === normalizedPlayerId(playerUid));
   root.innerHTML = '';
   if (!player) {
-    root.innerHTML = '<div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>点击一名玩家</strong><p>这里会显示服务器实时位置、身份和可用的复制、Teleport 命令。</p></div>';
+    root.innerHTML = '<div class="detail-empty"><i class="ph ph-crosshair" aria-hidden="true"></i><strong>选择玩家或据点</strong><p>这里会显示实时玩家命令，或存档据点的公会、范围与精确坐标。</p></div>';
     return;
   }
   const article = document.createElement('article'); article.className = 'map-player-card';
@@ -776,10 +856,112 @@ function renderMapPlayerDetail(playerUid) {
   article.append(head, location, facts, actions); root.append(article);
 }
 
+function renderMapBaseDetail(baseId) {
+  const root = document.querySelector('#map-player-detail');
+  const base = mapData?.base_camps.find(row => row.base_id === baseId);
+  root.innerHTML = '';
+  if (!base) { renderMapPlayerDetail(null); return; }
+  const article = document.createElement('article'); article.className = 'map-player-card map-base-card';
+  const head = document.createElement('header');
+  const identity = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = base.is_owner_guild ? '我的公会 · 存档据点' : '公会 · 存档据点';
+  const name = document.createElement('h2'); name.textContent = `${base.guild_name} · 据点 ${base.base_index}`;
+  const level = document.createElement('p'); level.className = 'map-player-level'; level.textContent = `公会 Lv.${base.guild_level} · ${base.guild_member_count} 名成员`;
+  identity.append(eyebrow, name, level);
+  const state = document.createElement('span'); state.className = 'map-player-state'; state.textContent = '只读快照';
+  head.append(identity, state);
+  const location = document.createElement('div'); location.className = 'map-location-card';
+  location.innerHTML = '<i class="ph ph-map-pin" aria-hidden="true"></i><span><small>存档精确坐标</small><strong></strong></span>';
+  location.querySelector('strong').textContent = `X ${base.location.x.toFixed(2)} · Y ${base.location.y.toFixed(2)} · Z ${base.location.z.toFixed(2)}`;
+  const facts = document.createElement('dl'); facts.className = 'map-player-facts';
+  facts.append(
+    detailRow('据点范围', Math.round(base.area_range).toLocaleString()),
+    detailRow('据点 GUID', base.base_id, true),
+    detailRow('公会 GUID', base.guild_id, true),
+    detailRow('会长 UID', base.guild_admin_player_uid, true),
+  );
+  const actions = document.createElement('div'); actions.className = 'map-player-actions';
+  const coordinates = `${base.location.x.toFixed(2)}, ${base.location.y.toFixed(2)}, ${base.location.z.toFixed(2)}`;
+  actions.append(playerCopyButton(coordinates, '复制 XYZ 坐标', 'secondary'), playerCopyButton(base.base_id, '复制据点 GUID', 'secondary'));
+  const full = document.createElement('button'); full.className = 'primary'; full.textContent = '打开公会详情';
+  full.addEventListener('click', async () => {
+    showView('saves'); showResourceTab('guilds');
+    if (!loadedGuilds.length) await loadGuilds();
+    selectGuild(base.guild_id);
+  });
+  actions.append(full);
+  article.append(head, location, facts, actions); root.append(article);
+}
+
+function focusMapLocation(location, minimumZoom = 2.4) {
+  if (!mapData) return;
+  const position = mapPosition(location);
+  mapView.zoom = Math.max(mapView.zoom, minimumZoom);
+  const size = document.querySelector('#map-stage').getBoundingClientRect();
+  mapView.panX = -((position.left - 50) / 100) * size.width * mapView.zoom;
+  mapView.panY = -((position.top - 50) / 100) * size.height * mapView.zoom;
+  updateMapTransform();
+}
+
+function mapSearchTargets() {
+  if (!mapData) return [];
+  const players = mapData.players.map(player => ({
+    kind: 'player', id: player.player_uid, label: player.nickname, meta: `在线玩家 · Lv.${player.level}`,
+    search: `${player.nickname} ${player.player_uid}`, location: player.location,
+  }));
+  const bases = mapData.base_camps.map(base => ({
+    kind: 'base', id: base.base_id, label: `${base.guild_name} · 据点 ${base.base_index}`,
+    meta: `公会 Lv.${base.guild_level} · 范围 ${Math.round(base.area_range).toLocaleString()}`,
+    search: `${base.guild_name} ${base.base_id} ${base.guild_id} ${base.guild_member_names.join(' ')}`, location: base.location,
+  }));
+  const towers = mapData.boss_tower.map(([x, y], index) => ({
+    kind: 'tower', id: String(index), label: `塔主塔 ${index + 1}`, meta: `X ${Math.round(x).toLocaleString()} · Y ${Math.round(y).toLocaleString()}`,
+    search: `塔主塔 ${index + 1} boss tower`, location: {x, y},
+  }));
+  return [...players, ...bases, ...towers];
+}
+
+function focusMapTarget(target) {
+  if (target.kind === 'player') selectMapPlayer(target.id);
+  else if (target.kind === 'base') selectMapBase(target.id);
+  else { selectedMapPlayerId = null; selectedMapBaseId = null; renderMapPlayers(); renderBaseCampMarkers(); renderMapPlayerDetail(null); }
+  focusMapLocation(target.location);
+  document.querySelector('#map-focus-results').classList.add('hidden');
+}
+
+function renderMapFocusResults() {
+  const root = document.querySelector('#map-focus-results');
+  const query = document.querySelector('#map-focus-query').value.trim().toLocaleLowerCase('zh-CN');
+  root.innerHTML = '';
+  if (!query || !mapData) { root.classList.add('hidden'); return; }
+  const targets = mapSearchTargets().filter(target => target.search.toLocaleLowerCase('zh-CN').includes(query)).slice(0, 8);
+  for (const target of targets) {
+    const button = document.createElement('button'); button.type = 'button';
+    const icon = target.kind === 'player' ? 'ph-user' : target.kind === 'base' ? 'ph-buildings' : 'ph-crown';
+    button.innerHTML = `<i class="ph ${icon}" aria-hidden="true"></i><span><strong></strong><small></small></span>`;
+    button.querySelector('strong').textContent = target.label;
+    button.querySelector('small').textContent = target.meta;
+    button.addEventListener('click', () => focusMapTarget(target));
+    root.append(button);
+  }
+  if (!targets.length) root.innerHTML = '<p>没有匹配的地图目标</p>';
+  root.classList.remove('hidden');
+}
+
 function selectMapPlayer(playerUid) {
   selectedMapPlayerId = playerUid;
+  selectedMapBaseId = null;
   renderMapPlayers();
+  renderBaseCampMarkers();
   renderMapPlayerDetail(playerUid);
+}
+
+function selectMapBase(baseId) {
+  selectedMapBaseId = baseId;
+  selectedMapPlayerId = null;
+  renderMapPlayers();
+  renderBaseCampMarkers();
+  renderMapBaseDetail(baseId);
 }
 
 async function loadWorldMap() {
@@ -792,25 +974,45 @@ async function loadWorldMap() {
   result.textContent = '';
   mapRequest = (async () => {
     try {
-      const [mapResponse, playersResponse] = await Promise.all([fetch('/api/world/map'), fetch('/api/server/players')]);
+      const guildPromise = activeWorld
+        ? fetch(`/api/world/guilds?path=${encodeURIComponent(activeWorld)}`).then(async response => {
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.detail || '存档据点读取失败');
+            return payload;
+          }).catch(error => ({guilds: [], base_count: 0, warning: `据点未加载：${error.message}`}))
+        : Promise.resolve({guilds: [], base_count: 0, warning: '尚未选择本地世界，据点未加载'});
+      const [mapResponse, playersResponse, guildData] = await Promise.all([fetch('/api/world/map'), fetch('/api/server/players'), guildPromise]);
       const data = await mapResponse.json();
       const playerData = await playersResponse.json();
       if (!mapResponse.ok) throw new Error(data.detail || '地图数据读取失败');
       if (!playersResponse.ok) throw new Error(playerData.detail || '服务器玩家位置读取失败');
       onlinePlayers = playerData.players;
       renderOnlinePlayers();
-      mapData = {...data, players: []};
+      if (!guildData.warning) {
+        loadedGuilds = guildData.guilds;
+        activeWorldHash = guildData.level_sha256;
+      }
+      mapData = {
+        ...data,
+        players: [],
+        guilds: guildData.guilds,
+        base_camps: guildBasesForMap(guildData.guilds),
+        guild_warning: guildData.warning || '',
+      };
       syncMapPlayersFromServer(onlinePlayers);
-      document.querySelector('#fast-travel-count').textContent = mapData.fast_travel_count;
       renderFastTravelMarkers();
-      renderMapPlayers();
-      if (!selectedMapPlayerId || !mapData.players.some(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId))) {
+      renderBossTowerMarkers();
+      const selectedBaseStillExists = mapData.base_camps.some(base => base.base_id === selectedMapBaseId);
+      if (!selectedBaseStillExists && (!selectedMapPlayerId || !mapData.players.some(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId)))) {
         selectedMapPlayerId = mapData.players.find(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(OWNER_PLAYER_UID))?.player_uid || mapData.players[0]?.player_uid || null;
       }
-      renderMapPlayerDetail(selectedMapPlayerId);
+      renderMapPlayers();
+      renderBaseCampMarkers();
+      if (selectedBaseStillExists) renderMapBaseDetail(selectedMapBaseId);
+      else { selectedMapBaseId = null; renderMapPlayerDetail(selectedMapPlayerId); }
+      renderMapFocusResults();
       empty.classList.add('hidden');
-      result.textContent = `${mapData.mappable_player_count} 名在线玩家位置 · ${mapData.fast_travel_count} 个传送点 · 坐标来自服务器 REST 接口`;
-      result.className = 'sync-result ok';
+      syncMapSummary();
     } catch (error) {
       empty.classList.remove('hidden');
       empty.querySelector('strong').textContent = '地图读取失败';
@@ -1025,6 +1227,7 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
     loadedGuilds = [];
     mapData = null;
     selectedMapPlayerId = null;
+    selectedMapBaseId = null;
     selectedContainerId = null;
     selectedGuildId = null;
     userPanel.classList.add('hidden');
@@ -1134,7 +1337,10 @@ document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEve
 
 document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });
 document.querySelector('#show-map-players').addEventListener('change', event => document.querySelector('#map-player-layer').classList.toggle('hidden', !event.target.checked));
+document.querySelector('#show-base-camps').addEventListener('change', event => document.querySelector('#base-camp-layer').classList.toggle('hidden', !event.target.checked));
 document.querySelector('#show-fast-travel').addEventListener('change', event => document.querySelector('#fast-travel-layer').classList.toggle('hidden', !event.target.checked));
+document.querySelector('#show-boss-towers').addEventListener('change', event => document.querySelector('#boss-tower-layer').classList.toggle('hidden', !event.target.checked));
+document.querySelector('#map-focus-query').addEventListener('input', renderMapFocusResults);
 document.querySelector('#map-zoom-in').addEventListener('click', () => setMapZoom(mapView.zoom + 0.35));
 document.querySelector('#map-zoom-out').addEventListener('click', () => setMapZoom(mapView.zoom - 0.35));
 document.querySelector('#map-reset-view').addEventListener('click', resetMapView);
@@ -1144,7 +1350,7 @@ mapStage.addEventListener('wheel', event => {
   setMapZoom(mapView.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
 }, {passive:false});
 mapStage.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || event.target.closest('.map-player-marker')) return;
+  if (event.button !== 0 || event.target.closest('.map-player-marker,.map-base-marker')) return;
   mapView.drag = {pointerId:event.pointerId, x:event.clientX, y:event.clientY, panX:mapView.panX, panY:mapView.panY};
   mapStage.setPointerCapture(event.pointerId);
   mapStage.classList.add('dragging');

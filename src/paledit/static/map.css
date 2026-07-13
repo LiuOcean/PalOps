@@ -15,3 +15,224 @@
   transform: translateY(-50%);
   pointer-events: none;
 }
+
+#base-camp-layer {
+  z-index: 20;
+}
+
+#boss-tower-layer {
+  z-index: 12;
+}
+
+.map-search-section {
+  overflow: visible;
+}
+
+.map-focus-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: #09120e;
+  color: #76827a;
+}
+
+.map-focus-search:focus-within {
+  border-color: #a8ff5570;
+  color: var(--lime);
+}
+
+.map-focus-search input {
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+  outline: 0;
+}
+
+.map-focus-results {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.map-focus-results button {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid #ffffff12;
+  border-radius: 6px;
+  background: #0b1510;
+  color: #a8b2ab;
+  text-align: left;
+}
+
+.map-focus-results button:hover {
+  border-color: #a8ff5547;
+  background: #111e16;
+}
+
+.map-focus-results button > i {
+  color: var(--lime);
+  font-size: 16px;
+  text-align: center;
+}
+
+.map-focus-results button span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.map-focus-results strong,
+.map-focus-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-focus-results strong {
+  font-size: 9px;
+}
+
+.map-focus-results small,
+.map-focus-results > p {
+  margin: 0;
+  color: #6f7b73;
+  font-size: 8px;
+}
+
+.map-base-range {
+  position: absolute;
+  min-width: 4px;
+  min-height: 4px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #f7b84a99;
+  border-radius: 50%;
+  background: #f7b84a1c;
+  box-shadow: 0 0 12px #f7b84a24 inset;
+}
+
+.map-base-range.owner {
+  border-color: #a8ff55b8;
+  background: #a8ff5523;
+  box-shadow: 0 0 12px #a8ff5530 inset;
+}
+
+.map-base-marker {
+  position: absolute;
+  display: block;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  color: #2a1903;
+  pointer-events: auto;
+}
+
+.map-base-pin {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid #ffe0a5;
+  border-radius: 6px 6px 6px 1px;
+  background: #d59428;
+  box-shadow: 0 3px 10px #000c;
+  transform: rotate(-45deg);
+  font-size: 11px;
+}
+
+.map-base-pin i {
+  transform: rotate(45deg);
+}
+
+.map-base-marker.owner .map-base-pin {
+  border-color: #e8ffc9;
+  background: #78bd3e;
+  color: #0d1a08;
+}
+
+.map-base-marker.active {
+  z-index: 40;
+}
+
+.map-base-marker.active .map-base-pin {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+.map-base-label {
+  position: absolute;
+  left: 29px;
+  top: 50%;
+  max-width: 115px;
+  overflow: hidden;
+  transform: translateY(-50%);
+  padding: 4px 7px;
+  border: 1px solid #f7b84a57;
+  border-radius: 5px;
+  background: #110d08e8;
+  color: #f2d29b;
+  font-size: 8px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.map-base-marker.owner .map-base-label,
+.map-base-marker.active .map-base-label {
+  border-color: #a8ff5570;
+  color: var(--lime);
+}
+
+.boss-tower-marker {
+  position: absolute;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border: 1px solid #f3d6ff;
+  border-radius: 50%;
+  background: #7d4aa9;
+  box-shadow: 0 0 0 2px #25112fb8, 0 3px 8px #000c;
+  color: white;
+  font-size: 9px;
+}
+
+.legend-base,
+.legend-tower {
+  display: inline-grid;
+  width: 11px;
+  height: 11px;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.legend-base {
+  transform: rotate(45deg);
+  border: 1px solid #ffe0a5;
+  border-radius: 3px 3px 3px 0;
+  background: #d59428;
+}
+
+.legend-tower {
+  border: 1px solid #f3d6ff;
+  border-radius: 50%;
+  background: #7d4aa9;
+}
+
+.map-base-card .map-location-card > i {
+  color: #e4aa43;
+}
