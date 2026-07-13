@@ -154,6 +154,32 @@ function appendOperationLog(label) {
   log.prepend(row);
 }
 
+async function copyPlayerText(text, button, label) {
+  const result = document.querySelector('#player-copy-result');
+  const original = button.innerHTML;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i> 已复制';
+    result.textContent = `已复制${label}：${text}`;
+    result.className = 'copy-result ok';
+  } catch (error) {
+    result.textContent = `复制失败，请手动复制：${text}`;
+    result.className = 'copy-result error';
+  } finally {
+    window.setTimeout(() => { button.innerHTML = original; }, 1400);
+  }
+}
+
+function playerCopyButton(text, label, className = 'copy-button') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.innerHTML = `<i class="ph ph-copy" aria-hidden="true"></i> ${label}`;
+  button.title = `复制 ${text}`;
+  button.addEventListener('click', () => copyPlayerText(text, button, label));
+  return button;
+}
+
 async function loadServerContext() {
   const state = document.querySelector('#server-state');
   const rcon = document.querySelector('#rcon-state');
@@ -195,13 +221,35 @@ function renderOnlinePlayers() {
   const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '请选择在线玩家'; select.append(placeholder);
   for (const player of onlinePlayers) {
     const compactRow = document.createElement('div'); compactRow.className = 'online-player';
+    const compactIdentity = document.createElement('span'); compactIdentity.className = 'online-player-identity';
     const compactName = document.createElement('strong'); compactName.textContent = player.name;
-    const compactMeta = document.createElement('small'); compactMeta.textContent = player.level ? `Lv.${player.level}` : '在线';
-    compactRow.append(compactName, compactMeta); compact.append(compactRow);
+    const compactMeta = document.createElement('small'); compactMeta.textContent = player.level ? `Lv.${player.level} · ${player.command_id}` : player.command_id;
+    compactIdentity.append(compactName, compactMeta);
+    compactRow.append(compactIdentity, playerCopyButton(player.command_id, '复制 ID', 'icon-copy-button')); compact.append(compactRow);
+
     const pageRow = document.createElement('div'); pageRow.className = 'standalone-player';
+    const pageHead = document.createElement('div'); pageHead.className = 'player-card-head';
     const pageName = document.createElement('strong'); pageName.textContent = player.name;
-    const pageMeta = document.createElement('span'); pageMeta.textContent = 'RCON 在线';
-    pageRow.append(pageName, pageMeta); page.append(pageRow);
+    const pageMeta = document.createElement('span'); pageMeta.textContent = player.level ? `Lv.${player.level} · 在线` : '在线';
+    pageHead.append(pageName, pageMeta);
+
+    const details = document.createElement('dl'); details.className = 'player-identifiers';
+    for (const [label, value] of [['Player ID', player.player_uid], ['User ID', player.steam_id]]) {
+      const row = document.createElement('div');
+      const term = document.createElement('dt'); term.textContent = label;
+      const data = document.createElement('dd');
+      const code = document.createElement('code'); code.textContent = value || '—';
+      data.append(code);
+      if (value) data.append(playerCopyButton(value, `复制 ${label}`));
+      row.append(term, data); details.append(row);
+    }
+
+    const commands = document.createElement('div'); commands.className = 'player-command-actions';
+    commands.append(
+      playerCopyButton(`/TeleportToMe ${player.command_id}`, 'TeleportToMe', 'secondary command-copy-button'),
+      playerCopyButton(`/TeleportToPlayer ${player.command_id}`, 'TeleportToPlayer', 'secondary command-copy-button'),
+    );
+    pageRow.append(pageHead, details, commands); page.append(pageRow);
     const option = document.createElement('option'); option.value = player.command_id; option.textContent = player.level ? `${player.name} · Lv.${player.level}` : player.name; select.append(option);
   }
 }

@@ -124,7 +124,7 @@
     </section>
 
     <section class="app-view hidden" data-page="overview"><div class="page-heading"><div><p class="eyebrow">PALWORLD 1.0</p><h1>服务器概览</h1><p>运维、玩家和存档工具集中在一个本地控制台。</p></div></div><div class="overview-callout"><h2>palworld-server Palworld</h2><p>进入“运维”执行安全操作，进入“存档”拉取并编辑世界数据。</p><button data-jump="operations" class="primary">进入服务器运维</button></div></section>
-    <section class="app-view hidden" data-page="players"><div class="page-heading"><div><p class="eyebrow">ONLINE PLAYERS</p><h1>玩家</h1><p>在线操作使用 RCON，下线数据编辑位于存档用户列表。</p></div><button data-jump="operations" class="primary">打开玩家管理</button></div><div id="players-page-list" class="standalone-list">正在读取在线玩家…</div></section>
+    <section class="app-view hidden" data-page="players"><div class="page-heading"><div><p class="eyebrow">ONLINE PLAYERS</p><h1>玩家</h1><p>查看在线身份，并快捷复制游戏内 GM 传送指令。</p></div><button data-jump="operations" class="primary">打开玩家管理</button></div><p id="player-copy-result" class="copy-result" aria-live="polite"></p><div id="players-page-list" class="standalone-list">正在读取在线玩家…</div></section>
     <section class="app-view hidden" data-page="config">
       <div class="page-heading"><div><p class="eyebrow">SERVER CONFIGURATION</p><h1>服务器配置</h1><p>查看与编辑 palworld-server 的持久化 Compose 配置；密码及凭据始终隐藏。</p></div><div class="panel-actions"><button id="export-config" class="secondary" disabled>导出 JSON</button><button id="reload-config" class="secondary">刷新配置</button></div></div>
       <section class="panel config-panel">
