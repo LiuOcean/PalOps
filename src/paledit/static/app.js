@@ -41,6 +41,8 @@ let selectedMapPlayerId = null;
 let selectedMapBaseId = null;
 let mapRequest = null;
 const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
+const MAP_MAX_DISPLAY_ZOOM = 8;
+let mapTileFrame = null;
 let serverConfig = null;
 let backupData = null;
 let selectedBackupId = null;
@@ -990,26 +992,165 @@ function syncMapPlayersFromServer(players) {
   syncMapSummary();
 }
 
-function updateMapPlayerPositions() {
-  document.querySelectorAll('#map-player-layer .map-player-marker').forEach(marker => {
-    const baseLeft = Number(marker.dataset.mapLeft);
-    const baseTop = Number(marker.dataset.mapTop);
-    const left = 50 + (baseLeft - 50) * mapView.zoom;
-    const top = 50 + (baseTop - 50) * mapView.zoom;
-    marker.style.left = `calc(${left}% + ${mapView.panX}px)`;
-    marker.style.top = `calc(${top}% + ${mapView.panY}px)`;
+function updateMapOverlayPositions() {
+  const stage = document.querySelector('#map-stage');
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
+  if (!width || !height) return;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const snap = value => Math.round(value * pixelRatio) / pixelRatio;
+
+  document.querySelectorAll('.map-layer [data-map-left]').forEach(marker => {
+    const mapLeft = Number(marker.dataset.mapLeft) / 100;
+    const mapTop = Number(marker.dataset.mapTop) / 100;
+    const centerX = width / 2 + (mapLeft * width - width / 2) * mapView.zoom + mapView.panX;
+    const centerY = height / 2 + (mapTop * height - height / 2) * mapView.zoom + mapView.panY;
+    const offsetX = Number(marker.dataset.mapOffsetX || 0);
+    const offsetY = Number(marker.dataset.mapOffsetY || 0);
+
+    if (marker.dataset.mapWidth && marker.dataset.mapHeight) {
+      const rangeWidth = width * (Number(marker.dataset.mapWidth) / 100) * mapView.zoom;
+      const rangeHeight = height * (Number(marker.dataset.mapHeight) / 100) * mapView.zoom;
+      marker.style.left = `${snap(centerX - rangeWidth / 2)}px`;
+      marker.style.top = `${snap(centerY - rangeHeight / 2)}px`;
+      marker.style.width = `${snap(rangeWidth)}px`;
+      marker.style.height = `${snap(rangeHeight)}px`;
+      return;
+    }
+
+    const anchorX = Number(marker.dataset.mapAnchorX || 0);
+    const anchorY = Number(marker.dataset.mapAnchorY || 0);
+    marker.style.left = `${snap(centerX + offsetX - anchorX)}px`;
+    marker.style.top = `${snap(centerY + offsetY - anchorY)}px`;
   });
 }
 
-function updateMapTransform() {
-  const plane = document.querySelector('#map-plane');
-  plane.style.transform = `translate(${mapView.panX}px, ${mapView.panY}px) scale(${mapView.zoom})`;
-  document.querySelector('#map-zoom-label').textContent = `${Math.round(mapView.zoom * 100)}%`;
-  updateMapPlayerPositions();
+function clampMapPan() {
+  const stage = document.querySelector('#map-stage');
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
+  const maxX = Math.max(0, (width * (mapView.zoom - 1)) / 2);
+  const maxY = Math.max(0, (height * (mapView.zoom - 1)) / 2);
+  mapView.panX = Math.max(-maxX, Math.min(maxX, mapView.panX));
+  mapView.panY = Math.max(-maxY, Math.min(maxY, mapView.panY));
 }
 
-function setMapZoom(next) {
-  mapView.zoom = Math.max(1, Math.min(4, next));
+function desiredMapTileLevel() {
+  const config = mapData?.tiles;
+  const stage = document.querySelector('#map-stage');
+  if (!config || !stage.clientWidth) return null;
+  const requiredPixels = Math.max(stage.clientWidth, stage.clientHeight) * window.devicePixelRatio * mapView.zoom;
+  const level = Math.ceil(Math.log2(Math.max(1, requiredPixels / config.tile_size)));
+  return Math.max(config.min_zoom, Math.min(config.max_zoom, level));
+}
+
+function mapTileUrl(template, level, x, y) {
+  return template.replace('{z}', level).replace('{x}', x).replace('{y}', y);
+}
+
+function setMapTileReady(ready) {
+  document.querySelector('#map-fallback-plane')?.classList.toggle('tiles-ready', ready);
+}
+
+function updateMapTileReadiness(level) {
+  const root = document.querySelector('#map-tile-layer');
+  if (root.dataset.level !== String(level)) return;
+  const tiles = [...root.querySelectorAll('img')];
+  setMapTileReady(tiles.length > 0 && tiles.every(tile => tile.complete && tile.naturalWidth > 0));
+}
+
+function renderMapTiles() {
+  mapTileFrame = null;
+  const config = mapData?.tiles;
+  const stage = document.querySelector('#map-stage');
+  const root = document.querySelector('#map-tile-layer');
+  const level = desiredMapTileLevel();
+  if (!config || level === null || !stage.clientWidth) return;
+
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
+  const columns = 2 ** level;
+  const planeLeft = ((-mapView.panX - width / 2) / mapView.zoom + width / 2) / width;
+  const planeRight = ((width - mapView.panX - width / 2) / mapView.zoom + width / 2) / width;
+  const planeTop = ((-mapView.panY - height / 2) / mapView.zoom + height / 2) / height;
+  const planeBottom = ((height - mapView.panY - height / 2) / mapView.zoom + height / 2) / height;
+  const startX = Math.max(0, Math.floor(planeLeft * columns) - 1);
+  const endX = Math.min(columns - 1, Math.floor(planeRight * columns) + 1);
+  const startY = Math.max(0, Math.floor(planeTop * columns) - 1);
+  const endY = Math.min(columns - 1, Math.floor(planeBottom * columns) + 1);
+  const existing = new Map([...root.querySelectorAll('img')].map(tile => [tile.dataset.tileKey, tile]));
+  const fragment = document.createDocumentFragment();
+  const pixelRatio = window.devicePixelRatio || 1;
+  const snap = value => Math.round(value * pixelRatio) / pixelRatio;
+  let addedTile = false;
+
+  if (root.dataset.level !== String(level)) {
+    root.dataset.level = String(level);
+    setMapTileReady(false);
+  }
+
+  for (let x = startX; x <= endX; x += 1) {
+    for (let y = startY; y <= endY; y += 1) {
+      const key = `${level}/${x}/${y}`;
+      let tile = existing.get(key);
+      if (tile) {
+        existing.delete(key);
+      } else {
+        tile = document.createElement('img');
+        tile.alt = '';
+        tile.draggable = false;
+        tile.decoding = 'async';
+        tile.dataset.tileKey = key;
+        tile.addEventListener('load', () => updateMapTileReadiness(level));
+        tile.addEventListener('error', () => setMapTileReady(false));
+        tile.src = mapTileUrl(config.url_template, level, x, y);
+        fragment.append(tile);
+        addedTile = true;
+      }
+
+      const left = snap(width / 2 + ((x / columns) * width - width / 2) * mapView.zoom + mapView.panX);
+      const right = snap(width / 2 + (((x + 1) / columns) * width - width / 2) * mapView.zoom + mapView.panX);
+      const top = snap(height / 2 + ((y / columns) * height - height / 2) * mapView.zoom + mapView.panY);
+      const bottom = snap(height / 2 + (((y + 1) / columns) * height - height / 2) * mapView.zoom + mapView.panY);
+      tile.style.left = `${left}px`;
+      tile.style.top = `${top}px`;
+      tile.style.width = `${right - left + 0.5 / pixelRatio}px`;
+      tile.style.height = `${bottom - top + 0.5 / pixelRatio}px`;
+    }
+  }
+  existing.forEach(tile => tile.remove());
+  root.append(fragment);
+  if (addedTile) setMapTileReady(false);
+  updateMapTileReadiness(level);
+  document.querySelector('#map-quality').innerHTML = `<i class="ph ph-squares-four" aria-hidden="true"></i> z${level} · ${(config.tile_size * columns).toLocaleString()}px`;
+}
+
+function scheduleMapTiles() {
+  if (mapTileFrame !== null) return;
+  mapTileFrame = requestAnimationFrame(renderMapTiles);
+}
+
+function updateMapTransform() {
+  clampMapPan();
+  const transform = `translate(${mapView.panX}px, ${mapView.panY}px) scale(${mapView.zoom})`;
+  document.querySelector('#map-fallback-plane').style.transform = transform;
+  document.querySelector('#map-zoom-label').textContent = `${Math.round(mapView.zoom * 100)}%`;
+  document.querySelector('#map-stage').classList.toggle('map-zoom-detail', mapView.zoom >= 2.2);
+  updateMapOverlayPositions();
+  scheduleMapTiles();
+}
+
+function setMapZoom(next, anchor = null) {
+  const previous = mapView.zoom;
+  const zoom = Math.max(1, Math.min(MAP_MAX_DISPLAY_ZOOM, next));
+  if (anchor && zoom !== previous) {
+    const rect = document.querySelector('#map-stage').getBoundingClientRect();
+    const cursorX = anchor.clientX - rect.left - rect.width / 2;
+    const cursorY = anchor.clientY - rect.top - rect.height / 2;
+    mapView.panX = cursorX - ((cursorX - mapView.panX) / previous) * zoom;
+    mapView.panY = cursorY - ((cursorY - mapView.panY) / previous) * zoom;
+  }
+  mapView.zoom = zoom;
   if (mapView.zoom === 1) { mapView.panX = 0; mapView.panY = 0; }
   updateMapTransform();
 }
@@ -1021,6 +1162,23 @@ function resetMapView() {
   updateMapTransform();
 }
 
+function mapWorldPositionAt(clientX, clientY) {
+  if (!mapData) return null;
+  const rect = document.querySelector('#map-stage').getBoundingClientRect();
+  const centeredX = clientX - rect.left - rect.width / 2;
+  const centeredY = clientY - rect.top - rect.height / 2;
+  const planeX = ((centeredX - mapView.panX) / mapView.zoom + rect.width / 2) / rect.width;
+  const planeY = ((centeredY - mapView.panY) / mapView.zoom + rect.height / 2) / rect.height;
+  if (planeX < 0 || planeX > 1 || planeY < 0 || planeY > 1) return null;
+  const bounds = mapData.landscape;
+  const mapX = -planeY * 256;
+  const mapY = planeX * 256;
+  return {
+    x: ((mapX + 256) * (bounds.max_x - bounds.min_x)) / 256 + bounds.min_x,
+    y: (mapY * (bounds.max_y - bounds.min_y)) / 256 + bounds.min_y,
+  };
+}
+
 function renderFastTravelMarkers() {
   const layer = document.querySelector('#fast-travel-layer');
   layer.innerHTML = '';
@@ -1030,13 +1188,16 @@ function renderFastTravelMarkers() {
     const position = mapPosition({x, y});
     const marker = document.createElement('span');
     marker.className = 'fast-travel-marker';
-    marker.style.left = `${position.left}%`;
-    marker.style.top = `${position.top}%`;
+    marker.dataset.mapLeft = position.left;
+    marker.dataset.mapTop = position.top;
+    marker.dataset.mapAnchorX = 4.5;
+    marker.dataset.mapAnchorY = 4.5;
     marker.title = `传送点 ${index + 1} · X ${Math.round(x).toLocaleString()} · Y ${Math.round(y).toLocaleString()}`;
     marker.setAttribute('aria-label', marker.title);
     fragment.append(marker);
   });
   layer.append(fragment);
+  updateMapOverlayPositions();
   layer.classList.toggle('hidden', !document.querySelector('#show-fast-travel').checked);
 }
 
@@ -1049,14 +1210,17 @@ function renderBossTowerMarkers() {
     const position = mapPosition({x, y});
     const marker = document.createElement('span');
     marker.className = 'boss-tower-marker';
-    marker.style.left = `${position.left}%`;
-    marker.style.top = `${position.top}%`;
+    marker.dataset.mapLeft = position.left;
+    marker.dataset.mapTop = position.top;
+    marker.dataset.mapAnchorX = 8.5;
+    marker.dataset.mapAnchorY = 8.5;
     marker.innerHTML = '<i class="ph ph-crown" aria-hidden="true"></i>';
     marker.title = `塔主塔 ${index + 1} · X ${Math.round(x).toLocaleString()} · Y ${Math.round(y).toLocaleString()}`;
     marker.setAttribute('aria-label', marker.title);
     fragment.append(marker);
   });
   layer.append(fragment);
+  updateMapOverlayPositions();
   layer.classList.toggle('hidden', !document.querySelector('#show-boss-towers').checked);
 }
 
@@ -1071,17 +1235,19 @@ function renderBaseCampMarkers() {
     const position = mapPosition(base.location);
     const range = document.createElement('span');
     range.className = `map-base-range${base.is_owner_guild ? ' owner' : ''}`;
-    range.style.left = `${position.left}%`;
-    range.style.top = `${position.top}%`;
-    range.style.width = `${(base.area_range * 2 / ySpan) * 100}%`;
-    range.style.height = `${(base.area_range * 2 / xSpan) * 100}%`;
+    range.dataset.mapLeft = position.left;
+    range.dataset.mapTop = position.top;
+    range.dataset.mapWidth = (base.area_range * 2 / ySpan) * 100;
+    range.dataset.mapHeight = (base.area_range * 2 / xSpan) * 100;
 
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.className = `map-base-marker${base.is_owner_guild ? ' owner' : ''}`;
     marker.classList.toggle('active', base.base_id === selectedMapBaseId);
-    marker.style.left = `${position.left}%`;
-    marker.style.top = `${position.top}%`;
+    marker.dataset.mapLeft = position.left;
+    marker.dataset.mapTop = position.top;
+    marker.dataset.mapAnchorX = 11;
+    marker.dataset.mapAnchorY = 11;
     marker.title = `${base.guild_name} · 据点 ${base.base_index} · 范围 ${Math.round(base.area_range).toLocaleString()}`;
     const pin = document.createElement('span'); pin.className = 'map-base-pin'; pin.innerHTML = '<i class="ph ph-buildings" aria-hidden="true"></i>';
     const label = document.createElement('span'); label.className = 'map-base-label'; label.textContent = base.guild_name;
@@ -1091,6 +1257,7 @@ function renderBaseCampMarkers() {
     fragment.append(range, marker);
   }
   layer.append(fragment);
+  updateMapOverlayPositions();
   layer.classList.toggle('hidden', !document.querySelector('#show-base-camps').checked);
 }
 
@@ -1130,8 +1297,10 @@ function renderMapPlayers() {
     marker.classList.toggle('active', normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId));
     marker.dataset.mapLeft = player.mapPosition.left;
     marker.dataset.mapTop = player.mapPosition.top;
-    marker.style.setProperty('--fan-x', `${offset.x}px`);
-    marker.style.setProperty('--fan-y', `${offset.y}px`);
+    marker.dataset.mapAnchorX = 12.5;
+    marker.dataset.mapAnchorY = 12.5;
+    marker.dataset.mapOffsetX = offset.x;
+    marker.dataset.mapOffsetY = offset.y;
     marker.title = `${player.nickname || '未命名玩家'} · Lv.${player.level} · 服务器实时位置`;
     const pin = document.createElement('span'); pin.className = 'map-player-pin'; pin.innerHTML = '<i class="ph ph-user" aria-hidden="true"></i>';
     const label = document.createElement('span'); label.className = 'map-player-label'; label.textContent = player.nickname || '未命名玩家';
@@ -1141,7 +1310,7 @@ function renderMapPlayers() {
     fragment.append(marker);
   }
   layer.append(fragment);
-  updateMapPlayerPositions();
+  updateMapOverlayPositions();
   layer.classList.toggle('hidden', !document.querySelector('#show-map-players').checked);
 }
 
@@ -1346,6 +1515,7 @@ async function loadWorldMap() {
       syncMapPlayersFromServer(onlinePlayers);
       renderFastTravelMarkers();
       renderBossTowerMarkers();
+      updateMapTransform();
       const selectedBaseStillExists = mapData.base_camps.some(base => base.base_id === selectedMapBaseId);
       if (!selectedBaseStillExists && (!selectedMapPlayerId || !mapData.players.some(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId)))) {
         selectedMapPlayerId = mapData.players.find(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(OWNER_PLAYER_UID))?.player_uid || mapData.players[0]?.player_uid || null;
@@ -1748,24 +1918,59 @@ document.querySelector('#show-base-camps').addEventListener('change', event => d
 document.querySelector('#show-fast-travel').addEventListener('change', event => document.querySelector('#fast-travel-layer').classList.toggle('hidden', !event.target.checked));
 document.querySelector('#show-boss-towers').addEventListener('change', event => document.querySelector('#boss-tower-layer').classList.toggle('hidden', !event.target.checked));
 document.querySelector('#map-focus-query').addEventListener('input', renderMapFocusResults);
-document.querySelector('#map-zoom-in').addEventListener('click', () => setMapZoom(mapView.zoom + 0.35));
-document.querySelector('#map-zoom-out').addEventListener('click', () => setMapZoom(mapView.zoom - 0.35));
+document.querySelector('#map-zoom-in').addEventListener('click', () => setMapZoom(mapView.zoom + 0.5));
+document.querySelector('#map-zoom-out').addEventListener('click', () => setMapZoom(mapView.zoom - 0.5));
 document.querySelector('#map-reset-view').addEventListener('click', resetMapView);
 const mapStage = document.querySelector('#map-stage');
+const mapWorkspace = document.querySelector('.map-workspace');
+const mapControlsToggle = document.querySelector('#map-controls-toggle');
+function setMapControlsOpen(open) {
+  mapWorkspace.classList.toggle('controls-open', open);
+  mapControlsToggle.setAttribute('aria-expanded', String(open));
+}
+mapControlsToggle.addEventListener('click', () => setMapControlsOpen(!mapWorkspace.classList.contains('controls-open')));
+document.querySelector('#map-controls-close').addEventListener('click', () => {
+  setMapControlsOpen(false);
+  mapControlsToggle.focus();
+});
+setMapControlsOpen(!window.matchMedia('(max-width: 700px)').matches);
 mapStage.addEventListener('wheel', event => {
   event.preventDefault();
-  setMapZoom(mapView.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
+  setMapZoom(mapView.zoom + (event.deltaY < 0 ? 0.35 : -0.35), event);
 }, {passive:false});
+mapStage.addEventListener('dblclick', event => {
+  if (event.target.closest('button')) return;
+  setMapZoom(mapView.zoom + 1, event);
+});
 mapStage.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || event.target.closest('.map-player-marker,.map-base-marker')) return;
+  if (event.button !== 0 || event.target.closest('button,input,label,.map-player-marker,.map-base-marker')) return;
   mapView.drag = {pointerId:event.pointerId, x:event.clientX, y:event.clientY, panX:mapView.panX, panY:mapView.panY};
   mapStage.setPointerCapture(event.pointerId);
   mapStage.classList.add('dragging');
 });
 mapStage.addEventListener('pointermove', event => {
-  if (!mapView.drag || mapView.drag.pointerId !== event.pointerId) return;
-  mapView.panX = mapView.drag.panX + event.clientX - mapView.drag.x;
-  mapView.panY = mapView.drag.panY + event.clientY - mapView.drag.y;
+  if (mapView.drag && mapView.drag.pointerId === event.pointerId) {
+    mapView.panX = mapView.drag.panX + event.clientX - mapView.drag.x;
+    mapView.panY = mapView.drag.panY + event.clientY - mapView.drag.y;
+    updateMapTransform();
+  }
+  const position = mapWorldPositionAt(event.clientX, event.clientY);
+  document.querySelector('#map-coordinate').textContent = position
+    ? `X ${Math.round(position.x).toLocaleString()} · Y ${Math.round(position.y).toLocaleString()}`
+    : 'X — · Y —';
+});
+mapStage.addEventListener('pointerleave', () => { document.querySelector('#map-coordinate').textContent = 'X — · Y —'; });
+mapStage.addEventListener('keydown', event => {
+  const panStep = event.shiftKey ? 120 : 48;
+  if (event.key === '+' || event.key === '=') setMapZoom(mapView.zoom + 0.5);
+  else if (event.key === '-' || event.key === '_') setMapZoom(mapView.zoom - 0.5);
+  else if (event.key === '0') resetMapView();
+  else if (event.key === 'ArrowLeft') mapView.panX += panStep;
+  else if (event.key === 'ArrowRight') mapView.panX -= panStep;
+  else if (event.key === 'ArrowUp') mapView.panY += panStep;
+  else if (event.key === 'ArrowDown') mapView.panY -= panStep;
+  else return;
+  event.preventDefault();
   updateMapTransform();
 });
 function stopMapDrag(event) {
@@ -1776,6 +1981,7 @@ function stopMapDrag(event) {
 }
 mapStage.addEventListener('pointerup', stopMapDrag);
 mapStage.addEventListener('pointercancel', stopMapDrag);
+new ResizeObserver(updateMapTransform).observe(mapStage);
 
 document.querySelectorAll('[data-route]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.route)));
 document.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => {

@@ -6,11 +6,21 @@ from pathlib import Path
 
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "map_points.json"
+TILE_SOURCE_REVISION = "7df5ec40c5d3f3ef50200f2048dc116a0b9938bf"
+TILE_CONFIG = {
+    "url_template": "/assets/map/tiles/{z}/{x}/{y}.png",
+    "tile_size": 256,
+    "min_zoom": 0,
+    "max_zoom": 6,
+    "native_resolution": 16_384,
+    "tile_count": 5_461,
+    "source_revision": TILE_SOURCE_REVISION,
+}
 LANDSCAPE = {
-    "max_x": 447900.0,
-    "max_y": 708920.0,
-    "min_x": -999940.0,
-    "min_y": -738920.0,
+    "max_x": 349400.0,
+    "max_y": 724400.0,
+    "min_x": -1099400.0,
+    "min_y": -724400.0,
 }
 
 
@@ -33,5 +43,6 @@ def get_map_config() -> dict[str, object]:
         "fast_travel_count": len(points["fast_travel"]),
         "boss_tower": points["boss_tower"],
         "boss_tower_count": len(points["boss_tower"]),
+        "tiles": TILE_CONFIG,
         "player_position_source": "Palworld REST /v1/api/players",
     }

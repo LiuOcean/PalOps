@@ -1,10 +1,21 @@
-Palworld map image, coordinate transform, and map point data
+Palworld coordinate transform and map point data
 Source: https://github.com/RNZ01/palworld-server-dashboard
 Revision: 9db699751df9206f734feba30b928bc309e819ff
 
-The map image in this directory is a WebP conversion of
-public/palworld-map/full-map-z4.png. The fast-travel coordinates are stored in
-paledit/data/map_points.json.
+The fast-travel coordinates are stored in paledit/data/map_points.json.
+
+High-resolution map tile pyramid (zoom levels 0 through 6)
+Source: https://github.com/zaigie/palworld-server-tool
+Revision: 7df5ec40c5d3f3ef50200f2048dc116a0b9938bf (v0.12.0)
+
+The 5,461 PNG tiles under tiles/ are copied from the pinned source revision
+and are managed with Git LFS. The source project is licensed under the Apache
+License 2.0; see LICENSE.palworld-server-tool.txt. The tiles contain game map
+imagery; the upstream software license does not grant separate rights to the
+underlying Palworld game content.
+
+full-map-z4.webp is generated from zoom-level 4 of this same tile pyramid and
+is used only as a low-resolution loading fallback and overview decoration.
 
 MIT License
 

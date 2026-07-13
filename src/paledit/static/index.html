@@ -97,24 +97,37 @@
       <section class="app-view hidden" data-page="map">
         <header class="workspace-header map-header">
           <div><p class="eyebrow">LIVE SERVER + SAVE MAP</p><h1><i class="ph ph-map-trifold" aria-hidden="true"></i> 帕鲁地图</h1><p>结合 palworld-server 在线玩家实时坐标与本地存档中的公会据点，统一查看位置、范围和详情。</p></div>
-          <div class="map-header-actions"><span id="map-snapshot" class="auto-refresh-note">等待服务器接口</span><button id="reload-map" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新位置</button></div>
+          <div class="map-header-actions"><span class="map-resolution-badge"><i class="ph ph-squares-four" aria-hidden="true"></i> 16K 本地瓦片</span><span id="map-snapshot" class="auto-refresh-note">等待服务器接口</span><button id="reload-map" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新位置</button></div>
         </header>
         <p id="map-result" class="sync-result" aria-live="polite"></p>
         <section class="map-workspace">
-          <aside class="map-controls panel">
-            <section class="map-search-section"><p class="eyebrow">定位</p><label class="map-focus-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索地图目标</span><input id="map-focus-query" type="search" placeholder="搜索玩家、公会或据点"></label><div id="map-focus-results" class="map-focus-results hidden"></div></section>
+          <aside id="map-controls" class="map-controls panel">
+            <header class="map-controls-head"><div><p class="eyebrow">地图控制台</p><strong>定位与图层</strong></div><button id="map-controls-close" class="icon-button" type="button" title="收起地图控制台" aria-label="收起地图控制台"><i class="ph ph-x" aria-hidden="true"></i></button></header>
+            <section class="map-search-section"><label class="map-focus-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索地图目标</span><input id="map-focus-query" type="search" placeholder="搜索玩家、公会或据点"></label><div id="map-focus-results" class="map-focus-results hidden"></div></section>
             <section><p class="eyebrow">图层</p><h2>地图内容</h2><label class="map-toggle"><input id="show-map-players" type="checkbox" checked><span><i class="ph ph-users" aria-hidden="true"></i> 玩家位置</span><b id="map-player-count">—</b></label><label class="map-toggle"><input id="show-base-camps" type="checkbox" checked><span><i class="ph ph-buildings" aria-hidden="true"></i> 公会据点</span><b id="base-camp-count">—</b></label><label class="map-toggle"><input id="show-fast-travel" type="checkbox" checked><span><i class="ph ph-navigation-arrow" aria-hidden="true"></i> 传送点</span><b id="fast-travel-count">—</b></label><label class="map-toggle"><input id="show-boss-towers" type="checkbox" checked><span><i class="ph ph-crown" aria-hidden="true"></i> 塔主塔</span><b id="boss-tower-count">—</b></label></section>
-            <section class="map-zoom-controls"><p class="eyebrow">视图</p><div><button id="map-zoom-out" class="icon-button" title="缩小">−</button><span id="map-zoom-label">100%</span><button id="map-zoom-in" class="icon-button" title="放大">+</button></div><button id="map-reset-view" class="secondary wide">重置视图</button></section>
             <section class="map-legend"><p class="eyebrow">说明</p><p><span class="legend-dot online"></span> 当前在线玩家</p><p><span class="legend-base"></span> 存档公会据点与范围</p><p><span class="legend-diamond"></span> 传送点</p><p><span class="legend-tower"></span> 塔主塔</p><small>拖动地图平移，滚轮缩放。玩家位置来自服务器 REST 并每 15 秒刷新；据点来自当前选中的本地存档快照。</small></section>
           </aside>
           <div id="map-stage" class="map-stage" tabindex="0" aria-label="Palworld 玩家位置地图">
-            <div id="map-plane" class="map-plane">
-              <img src="/assets/map/full-map-z4.webp" alt="Palworld 世界地图" draggable="false">
-              <div id="fast-travel-layer" class="map-layer"></div>
-              <div id="boss-tower-layer" class="map-layer"></div>
-              <div id="base-camp-layer" class="map-layer"></div>
+            <div class="map-stage-toolbar">
+              <button id="map-controls-toggle" class="secondary" type="button" aria-controls="map-controls" aria-expanded="true"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span>图层</span></button>
+              <span id="map-quality" class="map-quality"><i class="ph ph-squares-four" aria-hidden="true"></i> 准备瓦片</span>
+              <span id="map-coordinate" class="map-coordinate">X — · Y —</span>
+              <div class="map-inline-zoom" aria-label="地图缩放">
+                <button id="map-zoom-out" class="icon-button" type="button" title="缩小" aria-label="缩小地图">−</button>
+                <span id="map-zoom-label">100%</span>
+                <button id="map-zoom-in" class="icon-button" type="button" title="放大" aria-label="放大地图">+</button>
+                <button id="map-reset-view" class="icon-button" type="button" title="重置视图" aria-label="重置地图视图"><i class="ph ph-corners-out" aria-hidden="true"></i></button>
+              </div>
             </div>
+            <div id="map-fallback-plane" class="map-plane map-fallback-plane" aria-hidden="true">
+              <img class="map-fallback" src="/assets/map/full-map-z4.webp" alt="" draggable="false">
+            </div>
+            <div id="map-tile-layer" class="map-tile-layer" aria-hidden="true"></div>
+            <div id="fast-travel-layer" class="map-layer"></div>
+            <div id="boss-tower-layer" class="map-layer"></div>
+            <div id="base-camp-layer" class="map-layer"></div>
             <div id="map-player-layer" class="map-layer"></div>
+            <p class="map-attribution">地图瓦片 · palworld-server-tool v0.12.0</p>
             <div id="map-empty" class="map-empty"><i class="ph ph-map-trifold" aria-hidden="true"></i><strong>正在准备地图</strong><p>将自动读取 palworld-server 当前在线玩家坐标。</p></div>
           </div>
           <aside id="map-player-detail" class="map-player-detail panel"><div class="detail-empty"><i class="ph ph-crosshair" aria-hidden="true"></i><strong>选择玩家或据点</strong><p>这里会显示实时玩家命令，或存档据点的公会、范围与精确坐标。</p></div></aside>
