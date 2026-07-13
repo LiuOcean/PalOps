@@ -1,0 +1,17 @@
+.map-player-marker {
+  display: block;
+  width: 25px;
+  height: 25px;
+}
+
+#map-player-layer {
+  z-index: 30;
+}
+
+.map-player-label {
+  position: absolute;
+  left: 31px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PalEdit</title>
   <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/map.css">
   <link rel="stylesheet" href="/assets/icons/phosphor.css">
 </head>
 <body>
@@ -16,6 +17,7 @@
         <button data-view="overview"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与运行概况</small></span></button>
         <button data-view="players"><i class="ph ph-user-focus" aria-hidden="true"></i><span><strong>在线与权限</strong><small>玩家身份与管理</small></span></button>
         <button data-view="saves" class="active"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界数据</strong><small>玩家、储物箱与存档</small></span></button>
+        <button data-view="map"><i class="ph ph-map-trifold" aria-hidden="true"></i><span><strong>帕鲁地图</strong><small>玩家位置与传送点</small></span></button>
         <button data-view="config"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>服务器规则</strong><small>游戏规则与参数</small></span></button>
         <button data-view="operations"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span><strong>维护记录</strong><small>重启、广播与日志</small></span></button>
         <p class="nav-label tools-label">工具</p>
@@ -72,6 +74,30 @@
             <div id="container-detail" class="container-detail"><div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div></div>
             <section id="player-detail" class="player-detail hidden"><div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>选择一名玩家</strong><p>基础资料、背包和帕鲁会在这里展开。</p></div></section>
           </section>
+        </section>
+      </section>
+
+      <section class="app-view hidden" data-page="map">
+        <header class="workspace-header map-header">
+          <div><p class="eyebrow">LIVE SERVER MAP</p><h1><i class="ph ph-map-trifold" aria-hidden="true"></i> 帕鲁地图</h1><p>显示 palworld-server 当前在线玩家的服务器实时坐标，并提供传送点与玩家命令。</p></div>
+          <div class="map-header-actions"><span id="map-snapshot" class="auto-refresh-note">等待服务器接口</span><button id="reload-map" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新位置</button></div>
+        </header>
+        <p id="map-result" class="sync-result" aria-live="polite"></p>
+        <section class="map-workspace">
+          <aside class="map-controls panel">
+            <section><p class="eyebrow">图层</p><h2>地图内容</h2><label class="map-toggle"><input id="show-map-players" type="checkbox" checked><span><i class="ph ph-users" aria-hidden="true"></i> 玩家位置</span><b id="map-player-count">—</b></label><label class="map-toggle"><input id="show-fast-travel" type="checkbox" checked><span><i class="ph ph-navigation-arrow" aria-hidden="true"></i> 传送点</span><b id="fast-travel-count">—</b></label></section>
+            <section class="map-zoom-controls"><p class="eyebrow">视图</p><div><button id="map-zoom-out" class="icon-button" title="缩小">−</button><span id="map-zoom-label">100%</span><button id="map-zoom-in" class="icon-button" title="放大">+</button></div><button id="map-reset-view" class="secondary wide">重置视图</button></section>
+            <section class="map-legend"><p class="eyebrow">说明</p><p><span class="legend-dot online"></span> 当前在线玩家</p><p><span class="legend-diamond"></span> 传送点</p><small>拖动地图平移，滚轮缩放。玩家位置直接来自 Palworld REST `/v1/api/players`，每 15 秒刷新。</small></section>
+          </aside>
+          <div id="map-stage" class="map-stage" tabindex="0" aria-label="Palworld 玩家位置地图">
+            <div id="map-plane" class="map-plane">
+              <img src="/assets/map/full-map-z4.webp" alt="Palworld 世界地图" draggable="false">
+              <div id="fast-travel-layer" class="map-layer"></div>
+            </div>
+            <div id="map-player-layer" class="map-layer"></div>
+            <div id="map-empty" class="map-empty"><i class="ph ph-map-trifold" aria-hidden="true"></i><strong>正在准备地图</strong><p>将自动读取 palworld-server 当前在线玩家坐标。</p></div>
+          </div>
+          <aside id="map-player-detail" class="map-player-detail panel"><div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>点击一名玩家</strong><p>这里会显示服务器实时位置、身份和可用的复制、Teleport 命令。</p></div></aside>
         </section>
       </section>
 

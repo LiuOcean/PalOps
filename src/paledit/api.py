@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .items import get_item, search_items
+from .map import get_map_config
 from .pals import search_pals
 from .parser import load_character_data
 from .remote import (
@@ -169,6 +170,14 @@ def containers(path: str) -> dict[str, object]:
         return list_storage_containers(Path(path))
     except Exception as error:
         raise HTTPException(status_code=422, detail=f"读取箱子失败：{error}") from error
+
+
+@app.get("/api/world/map")
+def world_map() -> dict[str, object]:
+    try:
+        return get_map_config()
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"读取地图数据失败：{error}") from error
 
 
 @app.patch("/api/world/users/{player_uid}")

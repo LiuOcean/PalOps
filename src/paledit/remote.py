@@ -11,6 +11,7 @@ import secrets
 import time
 from datetime import datetime
 from itertools import combinations
+from math import isfinite
 from pathlib import Path
 
 from .save import InvalidSaveError, discover_worlds
@@ -341,7 +342,15 @@ def _parse_players(output: str) -> list[dict[str, str]]:
     return players
 
 
-def list_online_players() -> list[dict[str, str]]:
+def _finite_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
+def list_online_players() -> list[dict[str, object]]:
     result = _ssh([
         REMOTE_DOCKER, "exec", SERVER_CONTAINER, "sh", "-lc",
         'curl -fsS --max-time 10 -u "admin:$ADMIN_PASSWORD" http://127.0.0.1:8212/v1/api/players',
@@ -354,6 +363,8 @@ def list_online_players() -> list[dict[str, str]]:
             "steam_id": str(player.get("userId") or ""),
             "command_id": str(player.get("userId") or ""),
             "level": str(player.get("level") or ""),
+            "location_x": _finite_float(player.get("location_x")),
+            "location_y": _finite_float(player.get("location_y")),
         } for player in payload.get("players", []) if player.get("userId")]
     except (TypeError, ValueError) as error:
         raise RuntimeError("无法解析 palworld-server 在线玩家列表") from error

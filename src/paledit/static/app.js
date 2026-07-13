@@ -25,6 +25,11 @@ let selectedUserId = null;
 let onlinePlayers = [];
 let loadedContainers = [];
 let selectedContainerId = null;
+let discoveredWorlds = [];
+let mapData = null;
+let selectedMapPlayerId = null;
+let mapRequest = null;
+const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
 let serverConfig = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
@@ -35,6 +40,7 @@ function showView(name) {
   document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   if (name === 'config' && !serverConfig) loadServerConfig();
+  if (name === 'map') loadWorldMap();
 }
 
 function showResourceTab(name) {
@@ -188,7 +194,7 @@ function appendOperationLog(label) {
 }
 
 async function copyPlayerText(text, button, label) {
-  const result = document.querySelector('#player-copy-result');
+  const result = button.closest('[data-page="map"]') ? document.querySelector('#map-result') : document.querySelector('#player-copy-result');
   const original = button.innerHTML;
   try {
     await navigator.clipboard.writeText(text);
@@ -235,6 +241,11 @@ function loadServerContext({showLoading = true} = {}) {
       rcon.className = 'connection-state'; rcon.textContent = 'RCON 已连接';
       onlinePlayers = playerData.players;
       renderOnlinePlayers();
+      if (mapData) {
+        syncMapPlayersFromServer(onlinePlayers);
+        renderMapPlayers();
+        if (selectedMapPlayerId) renderMapPlayerDetail(selectedMapPlayerId);
+      }
     } catch (error) {
       state.className = 'status-pill offline'; state.textContent = '不可用';
       rcon.className = 'connection-state offline'; rcon.textContent = 'RCON 未连接';
@@ -321,10 +332,13 @@ async function scan() {
     const response = await fetch('/api/worlds');
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || '扫描失败');
+    discoveredWorlds = data.worlds;
+    if (!activeWorld && discoveredWorlds.length === 1) activeWorld = discoveredWorlds[0].path;
     rootNode.textContent = data.root;
     worldsNode.innerHTML = '';
     for (const world of data.worlds) worldsNode.append(renderWorld(world));
     if (!data.worlds.length) worldsNode.innerHTML = '<div class="empty">没有发现 Level.sav</div>';
+    if (!document.querySelector('[data-page="map"]').classList.contains('hidden')) loadWorldMap();
   } catch (error) {
     worldsNode.innerHTML = `<div class="empty">${error.message}</div>`;
   }
@@ -350,6 +364,7 @@ function renderWorld(world) {
       result.textContent = `兼容 · ${data.character_count} 个角色实体 · 可编辑用户与道具`;
       button.textContent = '重新诊断';
       activeWorld = world.path;
+      mapData = null;
       await Promise.all([loadUsers(), loadContainers()]);
       document.querySelector('#resource-empty').classList.add('hidden');
       showResourceTab('containers');
@@ -425,6 +440,245 @@ function selectContainer(containerId) {
     main.append(image, copy); row.append(main, count); items.append(row);
   }
   detailRoot.append(detail);
+}
+
+function normalizedPlayerId(value) {
+  return String(value || '').replaceAll('-', '').toLocaleLowerCase('en-US');
+}
+
+function mapPosition(location) {
+  const bounds = mapData.landscape;
+  const mapX = -256 + (256 * (location.x - bounds.min_x)) / (bounds.max_x - bounds.min_x);
+  const mapY = (256 * (location.y - bounds.min_y)) / (bounds.max_y - bounds.min_y);
+  return {left: (mapY / 256) * 100, top: (-mapX / 256) * 100};
+}
+
+function serverPlayersForMap(players) {
+  return players.flatMap(player => {
+    if (player.location_x === null || player.location_x === undefined || player.location_y === null || player.location_y === undefined) return [];
+    const x = Number(player.location_x);
+    const y = Number(player.location_y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+    return [{
+      ...player,
+      nickname: player.name || '未命名玩家',
+      location: {x, y},
+      location_source: 'Palworld REST /v1/api/players',
+    }];
+  });
+}
+
+function syncMapPlayersFromServer(players) {
+  if (!mapData) return;
+  mapData.players = serverPlayersForMap(players);
+  mapData.mappable_player_count = mapData.players.length;
+  mapData.captured_at = Date.now() / 1000;
+  document.querySelector('#map-player-count').textContent = mapData.mappable_player_count;
+  document.querySelector('#map-snapshot').textContent = `服务器实时 · ${new Date(mapData.captured_at * 1000).toLocaleTimeString('zh-CN', {hour12:false})}`;
+  const result = document.querySelector('#map-result');
+  result.textContent = `${mapData.mappable_player_count} 名在线玩家位置 · ${mapData.fast_travel_count} 个传送点 · 坐标来自服务器 REST 接口`;
+  result.className = 'sync-result ok';
+}
+
+function updateMapPlayerPositions() {
+  document.querySelectorAll('#map-player-layer .map-player-marker').forEach(marker => {
+    const baseLeft = Number(marker.dataset.mapLeft);
+    const baseTop = Number(marker.dataset.mapTop);
+    const left = 50 + (baseLeft - 50) * mapView.zoom;
+    const top = 50 + (baseTop - 50) * mapView.zoom;
+    marker.style.left = `calc(${left}% + ${mapView.panX}px)`;
+    marker.style.top = `calc(${top}% + ${mapView.panY}px)`;
+  });
+}
+
+function updateMapTransform() {
+  const plane = document.querySelector('#map-plane');
+  plane.style.transform = `translate(${mapView.panX}px, ${mapView.panY}px) scale(${mapView.zoom})`;
+  document.querySelector('#map-zoom-label').textContent = `${Math.round(mapView.zoom * 100)}%`;
+  updateMapPlayerPositions();
+}
+
+function setMapZoom(next) {
+  mapView.zoom = Math.max(1, Math.min(4, next));
+  if (mapView.zoom === 1) { mapView.panX = 0; mapView.panY = 0; }
+  updateMapTransform();
+}
+
+function resetMapView() {
+  mapView.zoom = 1;
+  mapView.panX = 0;
+  mapView.panY = 0;
+  updateMapTransform();
+}
+
+function renderFastTravelMarkers() {
+  const layer = document.querySelector('#fast-travel-layer');
+  layer.innerHTML = '';
+  if (!mapData) return;
+  const fragment = document.createDocumentFragment();
+  mapData.fast_travel.forEach(([x, y], index) => {
+    const position = mapPosition({x, y});
+    const marker = document.createElement('span');
+    marker.className = 'fast-travel-marker';
+    marker.style.left = `${position.left}%`;
+    marker.style.top = `${position.top}%`;
+    marker.title = `传送点 ${index + 1} · X ${Math.round(x).toLocaleString()} · Y ${Math.round(y).toLocaleString()}`;
+    marker.setAttribute('aria-label', marker.title);
+    fragment.append(marker);
+  });
+  layer.append(fragment);
+  layer.classList.toggle('hidden', !document.querySelector('#show-fast-travel').checked);
+}
+
+function playerFanout(players) {
+  const groups = new Map();
+  for (const player of players) {
+    const position = mapPosition(player.location);
+    player.mapPosition = position;
+    const key = `${Math.round(position.left)}:${Math.round(position.top)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(player);
+  }
+  const offsets = new Map();
+  for (const group of groups.values()) {
+    group.forEach((player, index) => {
+      if (group.length === 1) { offsets.set(player.player_uid, {x:0, y:0}); return; }
+      const radius = group.length <= 4 ? 20 : 28;
+      const angle = -Math.PI / 2 + (index / group.length) * Math.PI * 2;
+      offsets.set(player.player_uid, {x:Math.cos(angle) * radius, y:Math.sin(angle) * radius});
+    });
+  }
+  return offsets;
+}
+
+function renderMapPlayers() {
+  const layer = document.querySelector('#map-player-layer');
+  layer.innerHTML = '';
+  if (!mapData) return;
+  const players = mapData.players.filter(player => player.location);
+  const offsets = playerFanout(players);
+  const fragment = document.createDocumentFragment();
+  for (const player of players) {
+    const offset = offsets.get(player.player_uid) || {x:0,y:0};
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = `map-player-marker online${normalizedPlayerId(player.player_uid) === normalizedPlayerId(OWNER_PLAYER_UID) ? ' owner' : ''}`;
+    marker.classList.toggle('active', normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId));
+    marker.dataset.mapLeft = player.mapPosition.left;
+    marker.dataset.mapTop = player.mapPosition.top;
+    marker.style.setProperty('--fan-x', `${offset.x}px`);
+    marker.style.setProperty('--fan-y', `${offset.y}px`);
+    marker.title = `${player.nickname || '未命名玩家'} · Lv.${player.level} · 服务器实时位置`;
+    const pin = document.createElement('span'); pin.className = 'map-player-pin'; pin.innerHTML = '<i class="ph ph-user" aria-hidden="true"></i>';
+    const label = document.createElement('span'); label.className = 'map-player-label'; label.textContent = player.nickname || '未命名玩家';
+    marker.append(pin, label);
+    marker.addEventListener('pointerdown', event => event.stopPropagation());
+    marker.addEventListener('click', event => { event.stopPropagation(); selectMapPlayer(player.player_uid); });
+    fragment.append(marker);
+  }
+  layer.append(fragment);
+  updateMapPlayerPositions();
+  layer.classList.toggle('hidden', !document.querySelector('#show-map-players').checked);
+}
+
+function detailRow(label, value, code = false) {
+  const row = document.createElement('div');
+  const term = document.createElement('dt'); term.textContent = label;
+  const data = document.createElement('dd');
+  const content = document.createElement(code ? 'code' : 'span'); content.textContent = value;
+  data.append(content); row.append(term, data); return row;
+}
+
+function renderMapPlayerDetail(playerUid) {
+  const root = document.querySelector('#map-player-detail');
+  const player = mapData?.players.find(row => normalizedPlayerId(row.player_uid) === normalizedPlayerId(playerUid));
+  root.innerHTML = '';
+  if (!player) {
+    root.innerHTML = '<div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>点击一名玩家</strong><p>这里会显示服务器实时位置、身份和可用的复制、Teleport 命令。</p></div>';
+    return;
+  }
+  const article = document.createElement('article'); article.className = 'map-player-card';
+  const head = document.createElement('header');
+  const identity = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = '当前在线 · 服务器实时位置';
+  const name = document.createElement('h2'); name.textContent = player.nickname || '未命名玩家';
+  const level = document.createElement('p'); level.className = 'map-player-level'; level.textContent = `Lv.${player.level}`;
+  identity.append(eyebrow, name, level);
+  const state = document.createElement('span'); state.className = 'map-player-state online'; state.textContent = '在线';
+  head.append(identity, state);
+  const location = document.createElement('div'); location.className = 'map-location-card';
+  location.innerHTML = '<i class="ph ph-crosshair" aria-hidden="true"></i><span><small>服务器实时坐标</small><strong></strong></span>';
+  location.querySelector('strong').textContent = `X ${player.location.x.toFixed(2)} · Y ${player.location.y.toFixed(2)}`;
+  const facts = document.createElement('dl'); facts.className = 'map-player-facts';
+  facts.append(
+    detailRow('玩家 UID', player.player_uid, true),
+    detailRow('位置来源', player.location_source),
+  );
+  if (player.command_id) facts.append(detailRow('命令 ID', player.command_id, true));
+  const actions = document.createElement('div'); actions.className = 'map-player-actions';
+  actions.append(playerCopyButton(player.player_uid, '复制玩家 UID', 'secondary'));
+  if (player.command_id) {
+    actions.append(
+      playerCopyButton(player.command_id, '复制命令 ID', 'secondary'),
+      playerCopyButton(`/TeleportToMe ${player.command_id}`, 'TeleportToMe', 'secondary'),
+      playerCopyButton(`/TeleportToPlayer ${player.command_id}`, 'TeleportToPlayer', 'secondary'),
+    );
+  } else {
+    const disabled = document.createElement('button'); disabled.disabled = true; disabled.textContent = 'Teleport 仅在线可用'; disabled.title = '现有服务器命令需要在线列表提供的命令 ID'; actions.append(disabled);
+  }
+  const full = document.createElement('button'); full.className = 'primary'; full.textContent = '打开完整玩家详情';
+  full.addEventListener('click', async () => {
+    showView('saves'); showResourceTab('users');
+    if (!loadedUsers.length) await loadUsers();
+    selectUser(player.player_uid);
+  });
+  actions.append(full);
+  article.append(head, location, facts, actions); root.append(article);
+}
+
+function selectMapPlayer(playerUid) {
+  selectedMapPlayerId = playerUid;
+  renderMapPlayers();
+  renderMapPlayerDetail(playerUid);
+}
+
+async function loadWorldMap() {
+  if (mapRequest) return mapRequest;
+  const empty = document.querySelector('#map-empty');
+  const result = document.querySelector('#map-result');
+  empty.classList.remove('hidden');
+  empty.querySelector('strong').textContent = '正在读取服务器玩家位置';
+  empty.querySelector('p').textContent = '直接请求 palworld-server Palworld REST 在线玩家接口。';
+  result.textContent = '';
+  mapRequest = (async () => {
+    try {
+      const [mapResponse, playersResponse] = await Promise.all([fetch('/api/world/map'), fetch('/api/server/players')]);
+      const data = await mapResponse.json();
+      const playerData = await playersResponse.json();
+      if (!mapResponse.ok) throw new Error(data.detail || '地图数据读取失败');
+      if (!playersResponse.ok) throw new Error(playerData.detail || '服务器玩家位置读取失败');
+      onlinePlayers = playerData.players;
+      renderOnlinePlayers();
+      mapData = {...data, players: []};
+      syncMapPlayersFromServer(onlinePlayers);
+      document.querySelector('#fast-travel-count').textContent = mapData.fast_travel_count;
+      renderFastTravelMarkers();
+      renderMapPlayers();
+      if (!selectedMapPlayerId || !mapData.players.some(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(selectedMapPlayerId))) {
+        selectedMapPlayerId = mapData.players.find(player => normalizedPlayerId(player.player_uid) === normalizedPlayerId(OWNER_PLAYER_UID))?.player_uid || mapData.players[0]?.player_uid || null;
+      }
+      renderMapPlayerDetail(selectedMapPlayerId);
+      empty.classList.add('hidden');
+      result.textContent = `${mapData.mappable_player_count} 名在线玩家位置 · ${mapData.fast_travel_count} 个传送点 · 坐标来自服务器 REST 接口`;
+      result.className = 'sync-result ok';
+    } catch (error) {
+      empty.classList.remove('hidden');
+      empty.querySelector('strong').textContent = '地图读取失败';
+      empty.querySelector('p').textContent = error.message;
+      result.textContent = error.message; result.className = 'sync-result error';
+    } finally { mapRequest = null; }
+  })();
+  return mapRequest;
 }
 
 async function loadUsers() {
@@ -549,6 +803,8 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
     activeWorldHash = null;
     loadedContainers = [];
     loadedUsers = [];
+    mapData = null;
+    selectedMapPlayerId = null;
     selectedContainerId = null;
     userPanel.classList.add('hidden');
     containerPanel.classList.add('hidden');
@@ -618,6 +874,38 @@ palQuery.addEventListener('input', () => {
 containerQuery.addEventListener('input', renderContainers);
 document.querySelector('#reload-containers').addEventListener('click', loadContainers);
 document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEventListener('click', () => showResourceTab(button.dataset.resourceTab)));
+
+document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });
+document.querySelector('#show-map-players').addEventListener('change', event => document.querySelector('#map-player-layer').classList.toggle('hidden', !event.target.checked));
+document.querySelector('#show-fast-travel').addEventListener('change', event => document.querySelector('#fast-travel-layer').classList.toggle('hidden', !event.target.checked));
+document.querySelector('#map-zoom-in').addEventListener('click', () => setMapZoom(mapView.zoom + 0.35));
+document.querySelector('#map-zoom-out').addEventListener('click', () => setMapZoom(mapView.zoom - 0.35));
+document.querySelector('#map-reset-view').addEventListener('click', resetMapView);
+const mapStage = document.querySelector('#map-stage');
+mapStage.addEventListener('wheel', event => {
+  event.preventDefault();
+  setMapZoom(mapView.zoom + (event.deltaY < 0 ? 0.25 : -0.25));
+}, {passive:false});
+mapStage.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || event.target.closest('.map-player-marker')) return;
+  mapView.drag = {pointerId:event.pointerId, x:event.clientX, y:event.clientY, panX:mapView.panX, panY:mapView.panY};
+  mapStage.setPointerCapture(event.pointerId);
+  mapStage.classList.add('dragging');
+});
+mapStage.addEventListener('pointermove', event => {
+  if (!mapView.drag || mapView.drag.pointerId !== event.pointerId) return;
+  mapView.panX = mapView.drag.panX + event.clientX - mapView.drag.x;
+  mapView.panY = mapView.drag.panY + event.clientY - mapView.drag.y;
+  updateMapTransform();
+});
+function stopMapDrag(event) {
+  if (!mapView.drag || mapView.drag.pointerId !== event.pointerId) return;
+  mapView.drag = null;
+  mapStage.classList.remove('dragging');
+  if (mapStage.hasPointerCapture(event.pointerId)) mapStage.releasePointerCapture(event.pointerId);
+}
+mapStage.addEventListener('pointerup', stopMapDrag);
+mapStage.addEventListener('pointercancel', stopMapDrag);
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
 document.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => {

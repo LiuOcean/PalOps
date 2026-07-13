@@ -1,12 +1,13 @@
 import base64
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from paledit.remote import (
-    _compose_environment, _parse_players, get_server_config, prepare_server_restart,
+    _compose_environment, _parse_players, get_server_config, list_online_players, prepare_server_restart,
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 
@@ -93,6 +94,31 @@ def test_parse_players_uses_display_name_but_preserves_real_ids():
         "name": "Alice",
         "player_uid": "123456789",
         "steam_id": "steam_76561198000000000",
+    }]
+
+
+def test_online_players_expose_rest_api_locations(monkeypatch: pytest.MonkeyPatch):
+    payload = {
+        "players": [{
+            "name": "Alice",
+            "playerId": "PLAYER_UID",
+            "userId": "steam_123",
+            "level": 42,
+            "location_x": -123.5,
+            "location_y": 456.25,
+        }],
+    }
+    completed = subprocess.CompletedProcess([], 0, stdout=json.dumps(payload), stderr="")
+    monkeypatch.setattr("paledit.remote._ssh", lambda arguments: completed)
+
+    assert list_online_players() == [{
+        "name": "Alice",
+        "player_uid": "PLAYER_UID",
+        "steam_id": "steam_123",
+        "command_id": "steam_123",
+        "level": "42",
+        "location_x": -123.5,
+        "location_y": 456.25,
     }]
 
 
