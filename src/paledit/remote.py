@@ -10,6 +10,7 @@ import re
 import secrets
 import time
 from datetime import datetime
+from itertools import combinations
 from pathlib import Path
 
 from .save import InvalidSaveError, discover_worlds
@@ -69,6 +70,55 @@ _SETTING_METADATA = {
     "EQUIPMENT_DURABILITY_DAMAGE_RATE": ("装备耐久损耗倍率", "控制武器与防具耐久度下降速度；越低越耐用。"),
     "ITEM_CONTAINER_FORCE_MARK_DIRTY_INTERVAL": ("容器强制保存间隔", "定期把箱子等物品容器标记为已变更，降低异常退出时丢失更新的风险。"),
     "ITEM_CORRUPTION_MULTIPLIER": ("食物腐败速度倍率", "控制食物腐败速度；0 表示食物不会因时间腐败。"),
+}
+
+_BOOLEAN_SETTING_KEYS = {
+    "COMMUNITY",
+    "MULTITHREADING",
+    "UPDATE_ON_BOOT",
+    "USE_DEPOT_DOWNLOADER",
+    "BACKUP_ENABLED",
+    "DELETE_OLD_BACKUPS",
+    "REST_API_ENABLED",
+    "RCON_ENABLED",
+    "ALLOW_GLOBAL_PALBOX_EXPORT",
+    "ALLOW_GLOBAL_PALBOX_IMPORT",
+}
+
+_PLATFORM_LABELS = (
+    ("Steam", "电脑平台"),
+    ("Xbox", "微软主机"),
+    ("PS5", "索尼主机"),
+    ("Mac", "苹果电脑"),
+)
+
+
+def _crossplay_options() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            f"({','.join(value for value, _ in selected)})",
+            "、".join(label for _, label in selected),
+        )
+        for size in range(1, len(_PLATFORM_LABELS) + 1)
+        for selected in combinations(_PLATFORM_LABELS, size)
+    )
+
+
+_SETTING_OPTIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    **{key: (("true", "开启"), ("false", "关闭")) for key in _BOOLEAN_SETTING_KEYS},
+    "ARM64_DEVICE": (
+        ("generic", "通用设备"),
+        ("m1", "苹果芯片设备"),
+        ("rpi5", "树莓派 5"),
+        ("adlink", "凌华设备"),
+    ),
+    "CROSSPLAY_PLATFORMS": _crossplay_options(),
+    "DEATH_PENALTY": (
+        ("None", "不掉落"),
+        ("Item", "仅掉落非装备物品"),
+        ("ItemAndEquipment", "掉落物品和装备"),
+        ("All", "掉落物品、装备和全部帕鲁"),
+    ),
 }
 
 
@@ -153,6 +203,13 @@ def _setting_metadata(key: str) -> tuple[str, str]:
     return _SETTING_METADATA.get(key, (key.replace("_", " ").title(), "该参数由当前服务器镜像提供；修改后需重启才能应用。"))
 
 
+def _setting_options(key: str) -> list[dict[str, str]] | None:
+    options = _SETTING_OPTIONS.get(key)
+    if options is None:
+        return None
+    return [{"value": value, "label": label} for value, label in options]
+
+
 def get_server_config() -> dict[str, object]:
     text = _read_compose()
     settings, _, _ = _compose_environment(text)
@@ -167,6 +224,8 @@ def get_server_config() -> dict[str, object]:
                 "description": _setting_metadata(key)[1],
                 "value": row["value"],
                 "category": _setting_category(key),
+                "control": "select" if key in _SETTING_OPTIONS else "text",
+                "options": _setting_options(key),
             }
             for key, row in settings.items()
         ],
@@ -192,6 +251,9 @@ def update_server_config(updates: dict[str, object], expected_revision: str) -> 
         value = str(raw_value).strip()
         if not value or len(value) > 256 or "\n" in value or "\r" in value:
             raise ValueError(f"{key} 的值为空、过长或包含换行")
+        allowed_options = _SETTING_OPTIONS.get(key)
+        if allowed_options is not None and value not in {option[0] for option in allowed_options}:
+            raise ValueError(f"{key} 的值不在允许的选项中")
         if value == settings[key]["value"]:
             continue
         index = int(settings[key]["line"])

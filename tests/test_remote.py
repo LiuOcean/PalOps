@@ -136,7 +136,30 @@ def test_server_config_hides_credentials_and_limits_to_target_service(monkeypatc
     assert all("hidden" not in row["value"] for row in result["settings"])
     assert next(row for row in result["settings"] if row["key"] == "EXP_RATE")["label"] == "经验获取倍率"
     assert "经验值" in next(row for row in result["settings"] if row["key"] == "EXP_RATE")["description"]
+    assert next(row for row in result["settings"] if row["key"] == "EXP_RATE")["control"] == "text"
     assert result["revision"] == hashlib.sha256(COMPOSE.encode()).hexdigest()
+
+
+def test_server_config_exposes_chinese_select_options(monkeypatch: pytest.MonkeyPatch):
+    compose = COMPOSE.replace(
+        '      EXP_RATE: "3"\n',
+        '      EXP_RATE: "3"\n      COMMUNITY: "false"\n      ARM64_DEVICE: "m1"\n'
+        '      CROSSPLAY_PLATFORMS: "(Steam,Xbox,PS5,Mac)"\n      DEATH_PENALTY: "None"\n',
+    )
+    monkeypatch.setattr("paledit.remote._read_compose", lambda: compose)
+
+    settings = {row["key"]: row for row in get_server_config()["settings"]}
+
+    assert settings["COMMUNITY"]["options"] == [
+        {"value": "true", "label": "开启"},
+        {"value": "false", "label": "关闭"},
+    ]
+    assert settings["ARM64_DEVICE"]["control"] == "select"
+    assert {option["label"] for option in settings["DEATH_PENALTY"]["options"]} == {
+        "不掉落", "仅掉落非装备物品", "掉落物品和装备", "掉落物品、装备和全部帕鲁",
+    }
+    assert len(settings["CROSSPLAY_PLATFORMS"]["options"]) == 15
+    assert all(option["label"] for option in settings["CROSSPLAY_PLATFORMS"]["options"])
 
 
 def test_compose_environment_stops_before_next_service():
@@ -169,6 +192,14 @@ def test_update_server_config_rejects_hidden_or_unknown_keys(monkeypatch: pytest
 
     with pytest.raises(ValueError, match="不可编辑"):
         update_server_config({"SERVER_PASSWORD": "new"}, hashlib.sha256(COMPOSE.encode()).hexdigest())
+
+
+def test_update_server_config_rejects_value_outside_select_options(monkeypatch: pytest.MonkeyPatch):
+    compose = COMPOSE.replace('      EXP_RATE: "3"\n', '      EXP_RATE: "3"\n      DEATH_PENALTY: "None"\n')
+    monkeypatch.setattr("paledit.remote._read_compose", lambda: compose)
+
+    with pytest.raises(ValueError, match="不在允许的选项中"):
+        update_server_config({"DEATH_PENALTY": "Everything"}, hashlib.sha256(compose.encode()).hexdigest())
 
 
 def test_restart_requires_a_single_use_confirmation_token(monkeypatch: pytest.MonkeyPatch):

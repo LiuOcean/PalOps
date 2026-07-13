@@ -44,16 +44,16 @@ function setConfigResult(message, kind = '') {
 function configChanges() {
   if (!serverConfig) return {};
   const updates = {};
-  document.querySelectorAll('.config-row input').forEach(input => {
-    if (input.value !== input.dataset.original) updates[input.dataset.key] = input.value;
+  document.querySelectorAll('.config-row [data-config-control]').forEach(control => {
+    if (control.value !== control.dataset.original) updates[control.dataset.key] = control.value;
   });
   return updates;
 }
 
 function syncConfigChanges() {
   document.querySelectorAll('.config-row').forEach(row => {
-    const input = row.querySelector('input');
-    const changed = input.value !== input.dataset.original;
+    const control = row.querySelector('[data-config-control]');
+    const changed = control.value !== control.dataset.original;
     row.classList.toggle('changed', changed);
     row.querySelector('.change-state').textContent = changed ? '已修改' : '未修改';
   });
@@ -81,10 +81,24 @@ function renderServerConfig() {
       const description = document.createElement('span'); description.textContent = setting.description;
       const code = document.createElement('code'); code.textContent = setting.key;
       key.append(label, description, code);
-      const input = document.createElement('input'); input.value = setting.value; input.dataset.original = setting.value; input.dataset.key = setting.key; input.autocomplete = 'off'; input.spellcheck = false;
-      input.addEventListener('input', syncConfigChanges);
+      let control;
+      if (setting.control === 'select' && setting.options?.length) {
+        control = document.createElement('select');
+        for (const item of setting.options) {
+          const option = document.createElement('option'); option.value = item.value; option.textContent = item.label; control.append(option);
+        }
+        if (!setting.options.some(item => item.value === setting.value)) {
+          const option = document.createElement('option'); option.value = setting.value; option.textContent = '当前值暂未识别'; control.prepend(option);
+        }
+        control.value = setting.value;
+        control.addEventListener('change', syncConfigChanges);
+      } else {
+        control = document.createElement('input'); control.value = setting.value; control.autocomplete = 'off'; control.spellcheck = false;
+        control.addEventListener('input', syncConfigChanges);
+      }
+      control.dataset.configControl = ''; control.dataset.original = setting.value; control.dataset.key = setting.key;
       const state = document.createElement('span'); state.className = 'change-state'; state.textContent = '未修改';
-      row.append(key, input, state); root.append(row);
+      row.append(key, control, state); root.append(row);
     }
   }
   if (!root.children.length) root.innerHTML = '<div class="empty">没有匹配的配置项</div>';
