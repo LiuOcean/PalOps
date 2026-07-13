@@ -21,6 +21,11 @@ const containersNode = document.querySelector('#containers');
 const containerSummary = document.querySelector('#container-summary');
 const containerQuery = document.querySelector('#container-query');
 const containerTemplate = document.querySelector('#container-template');
+const guildPanel = document.querySelector('#guild-panel');
+const guildsNode = document.querySelector('#guilds');
+const guildSummary = document.querySelector('#guild-summary');
+const guildQuery = document.querySelector('#guild-query');
+const guildDetail = document.querySelector('#guild-detail');
 let activeWorld = null;
 let activeWorldHash = null;
 let loadedUsers = [];
@@ -28,6 +33,8 @@ let selectedUserId = null;
 let onlinePlayers = [];
 let loadedContainers = [];
 let selectedContainerId = null;
+let loadedGuilds = [];
+let selectedGuildId = null;
 let discoveredWorlds = [];
 let mapData = null;
 let selectedMapPlayerId = null;
@@ -53,12 +60,15 @@ function showResourceTab(name) {
     button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-resource-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.resourcePane !== name));
-  const hasData = name === 'containers' ? loadedContainers.length : loadedUsers.length;
+  const resources = {containers: loadedContainers, users: loadedUsers, guilds: loadedGuilds};
+  const hasData = resources[name]?.length || 0;
   document.querySelector('#resource-empty').classList.toggle('hidden', Boolean(hasData));
   document.querySelector('#container-detail').classList.toggle('hidden', name !== 'containers');
   document.querySelector('#player-detail').classList.toggle('hidden', name !== 'users');
+  document.querySelector('#guild-detail').classList.toggle('hidden', name !== 'guilds');
   if (name === 'containers' && hasData) selectContainer(selectedContainerId || loadedContainers[0].container_id);
   if (name === 'users' && hasData) selectUser(selectedUserId || loadedUsers[0].player_uid);
+  if (name === 'guilds' && hasData) selectGuild(selectedGuildId || loadedGuilds[0].guild_id);
 }
 
 function setConfigResult(message, kind = '') {
@@ -368,7 +378,7 @@ function renderWorld(world) {
       button.textContent = '重新诊断';
       activeWorld = world.path;
       mapData = null;
-      await Promise.all([loadUsers(), loadContainers()]);
+      await Promise.all([loadUsers(), loadContainers(), loadGuilds()]);
       document.querySelector('#resource-empty').classList.add('hidden');
       showResourceTab('containers');
     } catch (error) {
@@ -443,6 +453,133 @@ function selectContainer(containerId) {
     main.append(image, copy); row.append(main, count); items.append(row);
   }
   detailRoot.append(detail);
+}
+
+function guildSearchText(guild) {
+  const members = (guild.players || []).flatMap(player => [player.nickname, player.player_uid]);
+  return [guild.name, guild.display_name, guild.admin_player_uid, ...members].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN');
+}
+
+async function loadGuilds() {
+  if (!activeWorld) return;
+  guildPanel.classList.remove('hidden');
+  guildsNode.innerHTML = '<div class="empty">正在解码公会成员与据点位置…</div>';
+  const response = await fetch(`/api/world/guilds?path=${encodeURIComponent(activeWorld)}`);
+  const data = await response.json();
+  if (!response.ok) { guildsNode.innerHTML = `<div class="empty">${data.detail}</div>`; return; }
+  activeWorldHash = data.level_sha256;
+  loadedGuilds = data.guilds;
+  guildSummary.textContent = `${data.count} 个公会 · ${data.base_count} 个据点 · 只读展示`;
+  if (!selectedGuildId || !loadedGuilds.some(guild => guild.guild_id === selectedGuildId)) {
+    selectedGuildId = loadedGuilds.find(guild => guild.players.some(player => player.player_uid.toLowerCase() === OWNER_PLAYER_UID))?.guild_id || loadedGuilds[0]?.guild_id;
+  }
+  renderGuilds();
+}
+
+function renderGuilds() {
+  const query = guildQuery.value.trim().toLocaleLowerCase('zh-CN');
+  const rows = loadedGuilds.filter(guild => !query || guildSearchText(guild).includes(query));
+  guildsNode.innerHTML = '';
+  for (const guild of rows) {
+    const row = document.createElement('button'); row.className = 'resource-row guild-row'; row.dataset.guildId = guild.guild_id;
+    const icon = document.createElement('span'); icon.className = 'resource-row-icon'; icon.innerHTML = '<i class="ph ph-buildings" aria-hidden="true"></i>';
+    const copy = document.createElement('span'); copy.className = 'resource-row-copy';
+    const name = document.createElement('strong'); name.textContent = guild.display_name;
+    const facts = document.createElement('small'); facts.textContent = `${guild.member_count} 名成员 · ${guild.base_count} 个据点`;
+    copy.append(name, facts);
+    const level = document.createElement('span'); level.className = 'guild-level'; level.textContent = `Lv.${guild.base_camp_level}`;
+    row.append(icon, copy, level);
+    row.classList.toggle('active', guild.guild_id === selectedGuildId);
+    row.addEventListener('click', () => selectGuild(guild.guild_id));
+    guildsNode.append(row);
+  }
+  if (!rows.length) guildsNode.innerHTML = '<div class="empty">没有匹配的公会或成员</div>';
+  if (rows.length && !rows.some(guild => guild.guild_id === selectedGuildId)) selectGuild(rows[0].guild_id);
+  else if (document.querySelector('[data-resource-tab="guilds"]').classList.contains('active')) selectGuild(selectedGuildId);
+}
+
+function guildStat(label, value) {
+  const stat = document.createElement('div');
+  const caption = document.createElement('small'); caption.textContent = label;
+  const number = document.createElement('strong'); number.textContent = value;
+  stat.append(caption, number); return stat;
+}
+
+function renderGuildDetail(guild) {
+  const card = document.createElement('article'); card.className = 'container-detail-content guild-detail-content';
+  const header = document.createElement('header');
+  const title = document.createElement('div'); title.className = 'detail-title';
+  const icon = document.createElement('span'); icon.className = 'detail-icon'; icon.innerHTML = '<i class="ph ph-buildings" aria-hidden="true"></i>';
+  const copy = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = '公会与据点';
+  const heading = document.createElement('h2'); heading.textContent = guild.display_name;
+  const subtitle = document.createElement('p'); subtitle.className = 'container-type'; subtitle.textContent = `公会等级 Lv.${guild.base_camp_level}`;
+  copy.append(eyebrow, heading, subtitle); title.append(icon, copy);
+  const state = document.createElement('span'); state.className = 'read-only-state'; state.innerHTML = '<i class="ph ph-eye" aria-hidden="true"></i> 只读';
+  header.append(title, state); card.append(header);
+
+  const stats = document.createElement('div'); stats.className = 'detail-stats';
+  stats.append(guildStat('成员', `${guild.member_count} 人`), guildStat('据点', `${guild.base_count} 处`)); card.append(stats);
+
+  const memberSection = document.createElement('section'); memberSection.className = 'guild-section';
+  const memberHeading = document.createElement('h3'); memberHeading.textContent = '成员'; memberSection.append(memberHeading);
+  const memberList = document.createElement('div'); memberList.className = 'guild-member-list';
+  for (const member of guild.players) {
+    const row = document.createElement('div'); row.className = 'guild-member-row';
+    if (member.player_uid.toLowerCase() === OWNER_PLAYER_UID) row.classList.add('owner');
+    const avatar = document.createElement('span'); avatar.className = 'guild-member-icon';
+    avatar.innerHTML = `<i class="ph ${member.player_uid === guild.admin_player_uid ? 'ph-crown' : 'ph-user'}" aria-hidden="true"></i>`;
+    const memberCopy = document.createElement('span');
+    const name = document.createElement('strong'); name.textContent = member.nickname || '未命名成员';
+    const uid = document.createElement('code'); uid.textContent = member.player_uid;
+    memberCopy.append(name, uid);
+    const badges = document.createElement('span'); badges.className = 'guild-member-badges';
+    if (member.player_uid === guild.admin_player_uid) { const badge = document.createElement('b'); badge.textContent = '会长'; badges.append(badge); }
+    if (member.player_uid.toLowerCase() === OWNER_PLAYER_UID) { const badge = document.createElement('b'); badge.textContent = '我'; badges.append(badge); }
+    const linkedUser = loadedUsers.find(user => user.player_uid === member.player_uid);
+    if (linkedUser) {
+      const view = document.createElement('button'); view.className = 'icon-button guild-view-player'; view.title = '查看玩家存档'; view.innerHTML = '<i class="ph ph-arrow-right" aria-hidden="true"></i>';
+      view.addEventListener('click', () => { showResourceTab('users'); selectUser(member.player_uid); }); badges.append(view);
+    }
+    row.append(avatar, memberCopy, badges); memberList.append(row);
+  }
+  if (!guild.players.length) memberList.innerHTML = '<p class="container-empty">成员块无法从这个存档版本解码</p>';
+  memberSection.append(memberList); card.append(memberSection);
+
+  const baseSection = document.createElement('section'); baseSection.className = 'guild-section';
+  const baseHeading = document.createElement('h3'); baseHeading.textContent = '据点'; baseSection.append(baseHeading);
+  const baseList = document.createElement('div'); baseList.className = 'guild-base-list';
+  guild.base_camps.forEach((base, index) => {
+    const row = document.createElement('div'); row.className = 'guild-base-row';
+    const baseIcon = document.createElement('span'); baseIcon.className = 'guild-base-icon'; baseIcon.innerHTML = '<i class="ph ph-map-pin" aria-hidden="true"></i>';
+    const baseCopy = document.createElement('span');
+    const name = document.createElement('strong'); name.textContent = `据点 ${index + 1}`;
+    const location = document.createElement('code');
+    location.textContent = `X ${Math.round(base.location.x).toLocaleString()} · Y ${Math.round(base.location.y).toLocaleString()} · Z ${Math.round(base.location.z).toLocaleString()}`;
+    baseCopy.append(name, location);
+    const radius = document.createElement('small'); radius.textContent = `范围 ${Math.round(base.area_range).toLocaleString()}`;
+    row.append(baseIcon, baseCopy, radius); baseList.append(row);
+  });
+  if (!guild.base_camps.length) baseList.innerHTML = '<p class="container-empty">这个公会没有据点</p>';
+  baseSection.append(baseList); card.append(baseSection);
+
+  const technical = document.createElement('details'); technical.className = 'technical-info';
+  const summary = document.createElement('summary'); summary.textContent = '查看技术信息';
+  const values = document.createElement('dl');
+  for (const [label, value] of [['公会 GUID', guild.guild_id], ['会长 UID', guild.admin_player_uid]]) {
+    const row = document.createElement('div'); const term = document.createElement('dt'); term.textContent = label;
+    const detail = document.createElement('dd'); const code = document.createElement('code'); code.textContent = value; detail.append(code); row.append(term, detail); values.append(row);
+  }
+  technical.append(summary, values); card.append(technical);
+  return card;
+}
+
+function selectGuild(guildId) {
+  selectedGuildId = guildId;
+  guildsNode.querySelectorAll('.guild-row').forEach(row => row.classList.toggle('active', row.dataset.guildId === guildId));
+  const guild = loadedGuilds.find(row => row.guild_id === guildId);
+  guildDetail.innerHTML = '';
+  if (guild) guildDetail.append(renderGuildDetail(guild));
 }
 
 function normalizedPlayerId(value) {
@@ -718,6 +855,93 @@ function selectUser(playerUid) {
   if (user) playerDetail.append(renderUser(user));
 }
 
+const OWNED_PAL_PAGE_SIZE = 40;
+
+function ownedPalSearchText(pal) {
+  const skills = (pal.passive_skills || []).flatMap(skill => [skill.skill_id, skill.name_zh, skill.description]);
+  return [pal.name_zh, pal.nickname, pal.character_id, ...skills].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN');
+}
+
+function renderOwnedPal(pal) {
+  const row = document.createElement('details'); row.className = 'pal-chip';
+  const header = document.createElement('summary');
+  const image = document.createElement('img'); image.className = 'mini-pal-icon'; image.alt = ''; image.loading = 'lazy';
+  if (pal.icon_url) image.src = pal.icon_url; else image.classList.add('hidden');
+  const copy = document.createElement('span'); copy.className = 'pal-chip-copy';
+  const label = document.createElement('strong');
+  label.textContent = `${pal.name_zh}${pal.nickname ? ` · ${pal.nickname}` : ''}`;
+  const facts = document.createElement('small');
+  const gender = pal.gender === 'EPalGenderType::Male' ? '雄性' : pal.gender === 'EPalGenderType::Female' ? '雌性' : '';
+  facts.textContent = [`Lv.${pal.level}`, gender, pal.is_boss ? 'Boss' : '', pal.is_lucky ? '闪光' : '', pal.is_tower ? '塔主' : '', pal.condensation_rank > 1 ? `浓缩 ${pal.condensation_rank}` : ''].filter(Boolean).join(' · ');
+  copy.append(label, facts);
+  const id = document.createElement('code'); id.textContent = pal.character_id;
+  const chevron = document.createElement('i'); chevron.className = 'ph ph-caret-down pal-detail-chevron'; chevron.setAttribute('aria-hidden', 'true');
+  header.append(image, copy, id, chevron);
+
+  const detail = document.createElement('div'); detail.className = 'pal-detail-body';
+  const stats = document.createElement('div'); stats.className = 'pal-stat-grid';
+  const statRows = [
+    ['当前 HP', pal.hp || '—'],
+    ['生命个体值', pal.talents?.hp || '—'],
+    ['攻击个体值', pal.talents?.attack || '—'],
+    ['防御个体值', pal.talents?.defense || '—'],
+  ];
+  for (const [name, value] of statRows) {
+    const stat = document.createElement('span');
+    const caption = document.createElement('small'); caption.textContent = name;
+    const number = document.createElement('strong'); number.textContent = value;
+    stat.append(caption, number); stats.append(stat);
+  }
+  detail.append(stats);
+  const boosts = Object.entries(pal.rank_boosts || {}).filter(([, value]) => value);
+  if (boosts.length) {
+    const boostLabels = {attack:'攻击', defense:'防御', work_speed:'工作速度'};
+    const boost = document.createElement('p'); boost.className = 'pal-rank-boosts';
+    boost.textContent = `强化加成 · ${boosts.map(([key, value]) => `${boostLabels[key]} +${value}`).join(' · ')}`;
+    detail.append(boost);
+  }
+  const skillList = document.createElement('div'); skillList.className = 'passive-skill-list';
+  const skillHeading = document.createElement('h4'); skillHeading.textContent = `被动技能 · ${(pal.passive_skills || []).length}`; skillList.append(skillHeading);
+  for (const skill of pal.passive_skills || []) {
+    const skillRow = document.createElement('div'); skillRow.className = 'passive-skill-row';
+    const title = document.createElement('span');
+    const name = document.createElement('strong'); name.textContent = skill.name_zh;
+    const skillId = document.createElement('code'); skillId.textContent = skill.skill_id;
+    title.append(name, skillId);
+    const description = document.createElement('p'); description.textContent = skill.description || '暂无效果说明。';
+    skillRow.append(title, description); skillList.append(skillRow);
+  }
+  if (!(pal.passive_skills || []).length) {
+    const empty = document.createElement('p'); empty.className = 'pal-skill-empty'; empty.textContent = '没有被动技能'; skillList.append(empty);
+  }
+  detail.append(skillList);
+  const technical = document.createElement('p'); technical.className = 'pal-technical'; technical.textContent = `实例 ${pal.instance_id}`; detail.append(technical);
+  row.append(header, detail);
+  return row;
+}
+
+function renderOwnedPals(card, user) {
+  const input = card.querySelector('.owned-pal-query');
+  const results = card.querySelector('.owned-pal-results');
+  const summary = card.querySelector('.owned-pal-summary');
+  const more = card.querySelector('.owned-pal-more');
+  let visible = OWNED_PAL_PAGE_SIZE;
+  const render = (reset = false) => {
+    if (reset) visible = OWNED_PAL_PAGE_SIZE;
+    const query = input.value.trim().toLocaleLowerCase('zh-CN');
+    const filtered = query ? user.pals.filter(pal => ownedPalSearchText(pal).includes(query)) : user.pals;
+    results.replaceChildren(...filtered.slice(0, visible).map(renderOwnedPal));
+    summary.textContent = `显示 ${Math.min(visible, filtered.length)} / ${filtered.length}`;
+    const remaining = Math.max(0, filtered.length - visible);
+    more.classList.toggle('hidden', remaining === 0);
+    more.textContent = `再加载 ${Math.min(OWNED_PAL_PAGE_SIZE, remaining)} 只`;
+    if (!filtered.length) results.innerHTML = '<div class="empty">没有匹配的帕鲁或被动技能</div>';
+  };
+  input.addEventListener('input', () => render(true));
+  more.addEventListener('click', () => { visible += OWNED_PAL_PAGE_SIZE; render(); });
+  render();
+}
+
 function renderUser(user) {
   const card = userTemplate.content.firstElementChild.cloneNode(true);
   card.querySelector('.user-name').textContent = user.nickname || '未命名用户';
@@ -726,22 +950,7 @@ function renderUser(user) {
   const form = card.querySelector('form');
   for (const field of ['nickname','level','experience','unused_status_points','satiety','technology_points']) form.elements[field].value = user[field] ?? 0;
   card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
-  const palBox = card.querySelector('.pal-list div');
-  for (const pal of user.pals) {
-    const row = document.createElement('div'); row.className = 'pal-chip';
-    const image = document.createElement('img'); image.className = 'mini-pal-icon'; image.alt = '';
-    if (pal.icon_url) image.src = pal.icon_url; else image.classList.add('hidden');
-    const copy = document.createElement('span'); copy.className = 'pal-chip-copy';
-    const label = document.createElement('strong');
-    label.textContent = `${pal.name_zh}${pal.nickname ? ` · ${pal.nickname}` : ''}`;
-    const facts = document.createElement('small');
-    const gender = pal.gender === 'EPalGenderType::Male' ? '雄性' : pal.gender === 'EPalGenderType::Female' ? '雌性' : '';
-    facts.textContent = [`Lv.${pal.level}`, gender, pal.is_boss ? 'Boss' : '', pal.is_lucky ? '闪光' : ''].filter(Boolean).join(' · ');
-    copy.append(label, facts);
-    const id = document.createElement('code'); id.textContent = pal.character_id;
-    row.append(image, copy, id);
-    palBox.append(row);
-  }
+  renderOwnedPals(card, user);
   const inventoryBox = card.querySelector('.inventory-list');
   for (const [category, slots] of Object.entries(user.inventories || {})) {
     const group = document.createElement('div'); group.className = 'inventory-group';
@@ -813,13 +1022,17 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
     activeWorldHash = null;
     loadedContainers = [];
     loadedUsers = [];
+    loadedGuilds = [];
     mapData = null;
     selectedMapPlayerId = null;
     selectedContainerId = null;
+    selectedGuildId = null;
     userPanel.classList.add('hidden');
     containerPanel.classList.add('hidden');
+    guildPanel.classList.add('hidden');
     document.querySelector('#resource-empty').classList.remove('hidden');
     document.querySelector('#container-detail').innerHTML = '<div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div>';
+    document.querySelector('#guild-detail').innerHTML = '<div class="detail-empty"><i class="ph ph-buildings" aria-hidden="true"></i><strong>选择一个公会</strong><p>会长、成员与据点位置会在这里展开。</p></div>';
     await scan();
   } catch (error) {
     result.className = 'sync-result error';
@@ -915,6 +1128,8 @@ skillQuery.addEventListener('input', () => {
 });
 containerQuery.addEventListener('input', renderContainers);
 document.querySelector('#reload-containers').addEventListener('click', loadContainers);
+guildQuery.addEventListener('input', renderGuilds);
+document.querySelector('#reload-guilds').addEventListener('click', loadGuilds);
 document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEventListener('click', () => showResourceTab(button.dataset.resourceTab)));
 
 document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });

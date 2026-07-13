@@ -15,7 +15,7 @@ from .remote import (
 )
 from .save import InvalidSaveError, discover_worlds, sha256
 from .skills import search_skills
-from .world import list_storage_containers, list_users, update_inventory_slot, update_user
+from .world import list_guilds, list_storage_containers, list_users, update_inventory_slot, update_user
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
@@ -176,6 +176,14 @@ def containers(path: str) -> dict[str, object]:
         return list_storage_containers(Path(path))
     except Exception as error:
         raise HTTPException(status_code=422, detail=f"读取箱子失败：{error}") from error
+
+
+@app.get("/api/world/guilds")
+def guilds(path: str) -> dict[str, object]:
+    try:
+        return list_guilds(Path(path))
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"读取公会失败：{error}") from error
 
 
 @app.get("/api/world/map")

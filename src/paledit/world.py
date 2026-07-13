@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import os
 import shutil
+import struct
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from .pals import get_pal
 from .items import load_item_index
 from .parser import character_custom_properties, locate_item_container_objects, open_world, open_world_with_raw
 from .save import sha256
+from .skills import describe_skills
 
 
 def value_of(prop: Any, default: Any = None) -> Any:
@@ -44,6 +46,127 @@ def stat_value(prop: dict[str, Any] | None) -> int | float:
 
 def parameter_of(entity: dict[str, Any]) -> dict[str, Any]:
     return entity["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"]
+
+
+def array_values(prop: dict[str, Any] | None) -> list[Any]:
+    value = value_of(prop, [])
+    if isinstance(value, dict):
+        value = value.get("values", [])
+    return list(value) if isinstance(value, list) else []
+
+
+def decode_guild_raw(raw_values: Any, group_type: str) -> dict[str, object] | None:
+    """Decode the stable, read-only guild subset from a 1.0 raw group payload."""
+    if group_type != "EPalGroupType::Guild":
+        return None
+
+    from palworld_save_tools.archive import FArchiveReader, uuid_reader
+
+    reader = FArchiveReader(bytes(raw_values), debug=False)
+    group_id = str(reader.guid())
+    reader.fstring()  # Internal group name; the user-facing name follows below.
+    handle_count = reader.i32()
+    if not 0 <= handle_count <= 1_000_000:
+        raise ValueError(f"invalid guild handle count: {handle_count}")
+    if len(reader.read(handle_count * 32)) != handle_count * 32:
+        raise ValueError("truncated guild character handles")
+    reader.byte()  # Organization type.
+    reader.byte_list(4)
+    base_ids = [str(value) for value in reader.tarray(uuid_reader)]
+    reader.i32()
+    base_camp_level = reader.i32()
+    reader.tarray(uuid_reader)
+    guild_name = reader.fstring()
+    last_modifier_uid = str(reader.guid())
+    reader.byte_list(4)
+
+    players: list[dict[str, object]] = []
+    admin_player_uid = last_modifier_uid
+    members_decoded = False
+    tail = reader.read_to_end()
+    v1_marker = b"\x02\x00\x00\x00\x02\x03\x00\x00\x00\x00"
+    marker_at = tail.find(v1_marker)
+    if marker_at >= 0:
+        tail = tail[marker_at + len(v1_marker):]
+    try:
+        member_reader = FArchiveReader(tail, debug=False)
+        admin_player_uid = str(member_reader.guid())
+        player_count = member_reader.i32()
+        if not 0 <= player_count <= 10_000:
+            raise ValueError(f"invalid guild player count: {player_count}")
+        for _ in range(player_count):
+            player_uid = str(member_reader.guid())
+            last_online_ticks = member_reader.i64()
+            nickname = member_reader.fstring()
+            if marker_at >= 0 and not member_reader.eof():
+                member_reader.byte()
+            players.append({
+                "player_uid": player_uid,
+                "nickname": nickname,
+                "last_online_ticks": last_online_ticks,
+            })
+        members_decoded = True
+    except (EOFError, OSError, TypeError, UnicodeDecodeError, ValueError, struct.error):
+        players = []
+
+    unnamed = not guild_name.strip() or guild_name == "Unnamed Guild"
+    leader = next((player for player in players if player["player_uid"] == admin_player_uid), None)
+    suffix = str(leader["nickname"] if leader else admin_player_uid[-6:])
+    return {
+        "guild_id": group_id,
+        "name": guild_name,
+        "display_name": f"无名公会 · {suffix}" if unnamed else guild_name,
+        "is_unnamed": unnamed,
+        "base_camp_level": base_camp_level,
+        "admin_player_uid": admin_player_uid,
+        "players": players,
+        "member_count": len(players),
+        "members_decoded": members_decoded,
+        "base_ids": base_ids,
+    }
+
+
+def decode_base_camp_raw(raw_values: Any) -> dict[str, object]:
+    """Decode base identity and position without enabling its write codec."""
+    from palworld_save_tools.archive import FArchiveReader
+
+    reader = FArchiveReader(bytes(raw_values), debug=False)
+    base_id = str(reader.guid())
+    source_name = reader.fstring()
+    state = reader.byte()
+    transform = reader.ftransform()
+    area_range = reader.float()
+    group_id = str(reader.guid())
+    reader.ftransform()
+    owner_map_object_instance_id = str(reader.guid())
+    return {
+        "base_id": base_id,
+        "source_name": source_name,
+        "state": state,
+        "area_range": area_range,
+        "group_id": group_id,
+        "location": transform["translation"],
+        "owner_map_object_instance_id": owner_map_object_instance_id,
+    }
+
+
+def pal_readonly_details(param: dict[str, Any]) -> dict[str, object]:
+    skill_ids = [str(value) for value in array_values(param.get("PassiveSkillList"))]
+    return {
+        "hp": stat_value(param.get("Hp")),
+        "talents": {
+            "hp": int(value_of(param.get("Talent_HP"), 0)),
+            "attack": int(value_of(param.get("Talent_Shot"), 0)),
+            "defense": int(value_of(param.get("Talent_Defense"), 0)),
+        },
+        "condensation_rank": int(value_of(param.get("Rank"), 1)),
+        "rank_boosts": {
+            "attack": int(value_of(param.get("Rank_Attack"), 0)),
+            "defense": int(value_of(param.get("Rank_Defence"), 0)),
+            "work_speed": int(value_of(param.get("Rank_CraftSpeed"), 0)),
+        },
+        "passive_skills": describe_skills(skill_ids),
+    }
 
 
 def load_player_gvas(world_path: Path, player_uid: str):
@@ -157,6 +280,45 @@ def list_storage_containers(world_path: Path) -> dict[str, object]:
     }
 
 
+def list_guilds(world_path: Path) -> dict[str, object]:
+    world_path = world_path.expanduser().resolve()
+    gvas, _ = open_world(world_path / "Level.sav")
+    world = gvas.properties["worldSaveData"]["value"]
+
+    base_camps: list[dict[str, object]] = []
+    for row in value_of(world.get("BaseCampSaveData"), []):
+        raw = value_of(row["value"].get("RawData"), {})
+        values = raw.get("values", ()) if isinstance(raw, dict) else ()
+        base_camps.append(decode_base_camp_raw(values))
+
+    guilds: list[dict[str, object]] = []
+    for row in value_of(world.get("GroupSaveDataMap"), []):
+        group_type = str(value_of(row["value"].get("GroupType"), ""))
+        raw = value_of(row["value"].get("RawData"), {})
+        values = raw.get("values", ()) if isinstance(raw, dict) else ()
+        guild = decode_guild_raw(values, group_type)
+        if guild is None:
+            continue
+        base_ids = set(guild["base_ids"])
+        guild_bases = [
+            base for base in base_camps
+            if base["base_id"] in base_ids or base["group_id"] == guild["guild_id"]
+        ]
+        guild_bases.sort(key=lambda base: str(base["base_id"]))
+        guild["base_camps"] = guild_bases
+        guild["base_count"] = len(guild_bases)
+        guilds.append(guild)
+
+    guilds.sort(key=lambda guild: (-int(guild["base_camp_level"]), str(guild["display_name"])))
+    return {
+        "world_id": world_path.name,
+        "level_sha256": sha256(world_path / "Level.sav"),
+        "guilds": guilds,
+        "count": len(guilds),
+        "base_count": len(base_camps),
+    }
+
+
 def status_points(prop: dict[str, Any] | None) -> dict[str, int]:
     labels = {
         "EPalStatusPointType::MaxHP": "生命值",
@@ -221,6 +383,8 @@ def list_users(world_path: Path) -> dict[str, object]:
                 "gender": value_of(param.get("Gender"), ""),
                 "is_boss": bool(value_of(param.get("IsBoss"), False)),
                 "is_lucky": bool(value_of(param.get("IsRarePal"), False)),
+                "is_tower": character_id.casefold().startswith("gym_"),
+                **pal_readonly_details(param),
             })
     for uid, user in users.items():
         user["pals"] = sorted(pals_by_owner.get(uid, []), key=lambda pal: (str(pal["name_zh"]), str(pal["instance_id"])))
