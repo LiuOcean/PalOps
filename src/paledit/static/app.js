@@ -44,6 +44,7 @@ const mapView = {zoom: 1, panX: 0, panY: 0, drag: null};
 let serverConfig = null;
 let backupData = null;
 let pendingBackupRestore = null;
+let pendingBackupDelete = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
@@ -98,7 +99,7 @@ function renderBackups() {
     const sourceBadge = document.createElement('span'); sourceBadge.className = `backup-source ${backup.source}`; sourceBadge.textContent = backup.source_label;
     const stats = document.createElement('span'); stats.className = 'backup-row-stats';
     const size = document.createElement('strong'); size.textContent = formatBytes(backup.size_bytes);
-    const files = document.createElement('small'); files.textContent = `${backup.file_count.toLocaleString()} 个文件${backup.has_level_save ? ' · 含 Level.sav' : ''}`;
+    const files = document.createElement('small'); files.textContent = `${backup.file_count.toLocaleString()} 个文件${backup.has_level_save ? ' · 含 Level.sav' : ''}${backup.protected ? ' · 24 小时保护中' : ''}`;
     stats.append(size, files);
     const technical = document.createElement('details'); technical.className = 'backup-path';
     const summary = document.createElement('summary'); summary.textContent = '查看路径';
@@ -118,7 +119,12 @@ function renderBackups() {
     restore.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
     restore.title = restore.disabled ? '该备份中没有可恢复的世界' : '检查后恢复到本地 Save';
     restore.addEventListener('click', () => beginBackupRestore(backup, worldSelect?.value || backup.world_ids[0], restore));
-    actions.append(restore, technical);
+    const remove = document.createElement('button'); remove.className = 'backup-delete danger';
+    remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i> 删除';
+    remove.disabled = !backup.deletable;
+    remove.title = backup.protected ? `安全快照保护至 ${new Date(backup.protected_until).toLocaleString('zh-CN', {hour12:false})}` : '永久删除这份本地备份';
+    remove.addEventListener('click', () => beginBackupDelete(backup));
+    actions.append(restore, remove, technical);
     article.append(icon, copy, sourceBadge, stats, actions); root.append(article);
   }
   document.querySelector('#backup-summary').textContent = `显示 ${rows.length} / ${backupData?.count || 0} 份备份 · 固定目录只读扫描`;
@@ -137,6 +143,7 @@ async function loadBackups() {
     backupData = data;
     document.querySelector('#backup-total').textContent = data.count.toLocaleString();
     document.querySelector('#backup-size').textContent = formatBytes(data.total_size_bytes);
+    document.querySelector('#backup-review').textContent = `${data.retention.review_count.toLocaleString()} 份`;
     renderBackups();
   } catch (error) {
     root.innerHTML = '<div class="empty"></div>';
@@ -165,6 +172,17 @@ async function beginBackupRestore(backup, worldId, button) {
     pendingBackupRestore = null;
     setBackupResult(error.message, 'error');
   } finally { button.disabled = false; }
+}
+
+function beginBackupDelete(backup) {
+  pendingBackupDelete = backup;
+  document.querySelector('#delete-backup-name').textContent = backup.name;
+  document.querySelector('#delete-backup-source').textContent = backup.source_label;
+  document.querySelector('#delete-backup-world').textContent = backup.world_ids?.join(', ') || '未识别世界';
+  document.querySelector('#delete-backup-size').textContent = formatBytes(backup.size_bytes);
+  const checkbox = document.querySelector('#backup-delete-confirm'); checkbox.checked = false;
+  document.querySelector('#confirm-backup-delete').disabled = true;
+  document.querySelector('#backup-delete-dialog').showModal();
 }
 
 function showResourceTab(name) {
@@ -1514,6 +1532,33 @@ backupRestoreDialog.addEventListener('close', async () => {
   } finally {
     backupRestoreConfirm.checked = false;
     backupRestoreButton.disabled = true;
+  }
+});
+const backupDeleteDialog = document.querySelector('#backup-delete-dialog');
+const backupDeleteConfirm = document.querySelector('#backup-delete-confirm');
+const backupDeleteButton = document.querySelector('#confirm-backup-delete');
+backupDeleteConfirm.addEventListener('change', () => { backupDeleteButton.disabled = !backupDeleteConfirm.checked; });
+backupDeleteDialog.addEventListener('close', async () => {
+  if (backupDeleteDialog.returnValue !== 'confirm') {
+    pendingBackupDelete = null;
+    setBackupResult('已取消删除，备份未受影响。');
+    return;
+  }
+  const pending = pendingBackupDelete; pendingBackupDelete = null;
+  if (!pending) { setBackupResult('删除确认已失效，请重新扫描备份。', 'error'); return; }
+  setBackupResult(`正在删除 ${pending.name}…`);
+  try {
+    const response = await fetch(`/api/backups/${encodeURIComponent(pending.backup_id)}`, {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_created_at:pending.created_at, expected_size_bytes:pending.size_bytes, confirmed:true})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '备份删除失败');
+    backupData = null;
+    await loadBackups();
+    setBackupResult(`已删除 ${data.backup_name} · 释放 ${formatBytes(data.freed_bytes)}`, 'ok');
+  } catch (error) {
+    setBackupResult(error.message, 'error');
+  } finally {
+    backupDeleteConfirm.checked = false;
+    backupDeleteButton.disabled = true;
   }
 });
 

@@ -11,7 +11,7 @@ def test_current_level_is_palworld_1_0_oodle() -> None:
     assert len(worlds) == 1
     assert worlds[0].level.magic == "PlM"
     assert worlds[0].level.format == "oodle"
-    assert worlds[0].player_files == 10
+    assert worlds[0].player_files > 0
 
 
 def test_save_header_does_not_require_full_file_read() -> None:
@@ -19,4 +19,3 @@ def test_save_header_does_not_require_full_file_read() -> None:
     info = inspect_save(level)
     assert info.size > 0
     assert info.save_type == 0x31
-

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from paledit.backups import list_backups, prepare_backup_restore, restore_backup
+from paledit.backups import delete_backup, list_backups, prepare_backup_restore, restore_backup
 from paledit.save import sha256
 
 
@@ -41,6 +41,7 @@ def test_list_backups_combines_fixed_read_only_sources(tmp_path: Path) -> None:
     assert result["count"] == 4
     assert result["counts"] == {"sync": 1, "editor": 1, "game": 1, "box_plan": 1}
     assert result["read_only"] is True
+    assert result["retention"]["protected_count"] == 0
     assert {row["source"] for row in result["backups"]} == {"sync", "editor", "game", "box_plan"}
     assert all(row["world_ids"] == ["WORLD"] for row in result["backups"])
     assert all(row["has_level_save"] for row in result["backups"])
@@ -116,3 +117,55 @@ def test_prepare_restore_rejects_symlink_inside_backup(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="符号链接"):
         prepare_backup_restore(backup_id, "WORLD", save_root, backup_root)
+
+
+def test_delete_backup_requires_unchanged_scan_metadata(tmp_path: Path) -> None:
+    save_root = tmp_path / "Save"
+    _write_world(save_root, "WORLD", _save_payload(b"current"))
+    backup_root = tmp_path / ".paledit-backups"
+    snapshot = backup_root / "Save-20260713-120000-000000"
+    archived = _write_world(snapshot, "WORLD", _save_payload(b"archived"))
+    backup = list_backups(save_root, backup_root)["backups"][0]
+    (archived / "extra.bin").write_bytes(b"changed-after-scan")
+
+    with pytest.raises(ValueError, match="已变化"):
+        delete_backup(
+            str(backup["backup_id"]), str(backup["created_at"]), int(backup["size_bytes"]), save_root, backup_root,
+        )
+
+    assert snapshot.is_dir()
+
+
+def test_delete_backup_removes_only_selected_snapshot(tmp_path: Path) -> None:
+    save_root = tmp_path / "Save"
+    current = _write_world(save_root, "WORLD", _save_payload(b"current"))
+    backup_root = tmp_path / ".paledit-backups"
+    snapshot = backup_root / "Save-20260713-120000-000000"
+    _write_world(snapshot, "WORLD", _save_payload(b"archived"))
+    backup = list_backups(save_root, backup_root)["backups"][0]
+
+    result = delete_backup(
+        str(backup["backup_id"]), str(backup["created_at"]), int(backup["size_bytes"]), save_root, backup_root,
+    )
+
+    assert result["deleted"] is True
+    assert result["freed_bytes"] == backup["size_bytes"]
+    assert not snapshot.exists()
+    assert current.is_dir()
+
+
+def test_recent_restore_safety_snapshot_is_protected_from_delete(tmp_path: Path) -> None:
+    save_root = tmp_path / "Save"
+    _write_world(save_root, "WORLD", _save_payload(b"current"))
+    backup_root = tmp_path / ".paledit-backups"
+    snapshot = backup_root / "Restore-20260713-120000-000000"
+    _write_world(snapshot, "WORLD", _save_payload(b"safety"))
+    backup = list_backups(save_root, backup_root)["backups"][0]
+
+    assert backup["protected"] is True
+    with pytest.raises(ValueError, match="受保护"):
+        delete_backup(
+            str(backup["backup_id"]), str(backup["created_at"]), int(backup["size_bytes"]), save_root, backup_root,
+        )
+
+    assert snapshot.is_dir()

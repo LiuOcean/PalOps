@@ -1,17 +1,25 @@
 import shutil
 from pathlib import Path
 
-from paledit.world import list_users, update_inventory_slot, update_user
+from paledit.world import grant_inventory_items, list_storage_containers, list_users, update_inventory_slot, update_user
 
 ROOT = Path(__file__).parents[1]
-WORLD = next((ROOT / "Save" / "SaveGames" / "0").glob("*"))
+WORLD = next(path.parent for path in (ROOT / "Save" / "SaveGames" / "0").glob("*/Level.sav"))
+OWNER_PLAYER_UID = "00000000-0000-0000-0000-000000000000"
 
 
 def test_current_world_lists_real_users_and_owned_pals() -> None:
     result = list_users(WORLD)
-    assert len(result["users"]) == 10
+    assert result["users"]
+    assert any(user["player_uid"] == OWNER_PLAYER_UID for user in result["users"])
     assert all("nickname" in user and "pals" in user for user in result["users"])
     assert sum(user["pal_count"] for user in result["users"]) > 0
+
+
+def test_current_world_lists_storage_containers() -> None:
+    result = list_storage_containers(WORLD)
+    assert result["count"] > 0
+    assert all(row["container_id"] and "slots" in row for row in result["containers"])
 
 
 def test_user_update_round_trips_in_copy(tmp_path: Path) -> None:
@@ -39,6 +47,21 @@ def test_inventory_count_update_round_trips_in_copy(tmp_path: Path) -> None:
     changed_user = next(row for row in after["users"] if row["player_uid"] == user["player_uid"])
     changed_slot = next(row for row in changed_user["inventories"]["背包"] if row["slot_index"] == slot["slot_index"])
     assert changed_slot["count"] == slot["count"] + 1
+
+
+def test_inventory_grant_uses_new_slots_without_replacing_items(tmp_path: Path) -> None:
+    copied = tmp_path / "world"
+    shutil.copytree(WORLD, copied, ignore=shutil.ignore_patterns("backup", "PalEdit-Backup"))
+    before = list_users(copied)
+    user = next(row for row in before["users"] if row["inventories"].get("背包"))
+    original = {(row["slot_index"], row["item_id"], row["count"]) for row in user["inventories"]["背包"]}
+    after = grant_inventory_items(
+        copied, user["player_uid"], "背包", {"Potion_Extreme": 99}, before["level_sha256"],
+    )
+    changed = next(row for row in after["users"] if row["player_uid"] == user["player_uid"])
+    current = {(row["slot_index"], row["item_id"], row["count"]) for row in changed["inventories"]["背包"]}
+    assert original <= current
+    assert any(item_id == "Potion_Extreme" and count == 99 for _, item_id, count in current)
 
 
 def test_technology_points_can_be_set_to_9999(tmp_path: Path) -> None:

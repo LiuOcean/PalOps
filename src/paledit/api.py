@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .backups import list_backups, prepare_backup_restore, restore_backup
+from .backups import delete_backup, list_backups, prepare_backup_restore, restore_backup
 from .items import get_item, search_items
 from .map import get_map_config
 from .pals import search_pals
@@ -110,6 +110,21 @@ def backup_restore(payload: dict = Body(...)) -> dict[str, object]:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:
         raise HTTPException(status_code=500, detail=f"恢复备份失败：{error}") from error
+
+
+@app.delete("/api/backups/{backup_id}")
+def backup_delete(backup_id: str, payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        if payload.get("confirmed") is not True:
+            raise ValueError("请完成备份删除确认")
+        return delete_backup(
+            backup_id, str(payload["expected_created_at"]), int(payload["expected_size_bytes"]),
+            DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"删除备份失败：{error}") from error
 
 
 @app.get("/api/server/status")

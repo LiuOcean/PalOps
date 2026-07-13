@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .save import inspect_save, sha256
@@ -48,17 +48,25 @@ def _backup_row(path: Path, source: str, world_ids: list[str]) -> dict[str, obje
     size_bytes, file_count, has_level_save = _directory_stats(path)
     stat = path.stat()
     normalized_world_ids = sorted(set(world_ids))
+    created_at = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+    is_restore_safety = source == "sync" and path.name.startswith("Restore-")
+    protected_until = created_at + timedelta(hours=24) if is_restore_safety else None
+    protected = protected_until is not None and datetime.now(timezone.utc) < protected_until
     return {
         "backup_id": f"{source}:{','.join(normalized_world_ids) or 'unknown'}:{path.name}",
         "name": path.name,
         "source": source,
         "source_label": SOURCE_LABELS[source],
-        "created_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "created_at": created_at.isoformat(),
         "size_bytes": size_bytes,
         "file_count": file_count,
         "world_ids": normalized_world_ids,
         "path": str(path.resolve()),
         "has_level_save": has_level_save,
+        "is_restore_safety": is_restore_safety,
+        "protected": protected,
+        "protected_until": protected_until.isoformat() if protected_until else None,
+        "deletable": not protected,
     }
 
 
@@ -70,7 +78,7 @@ def list_backups(save_root: Path, sync_backup_root: Path) -> dict[str, object]:
 
     if sync_backup_root.is_dir():
         for snapshot in sync_backup_root.iterdir():
-            if not snapshot.is_dir() or snapshot.is_symlink():
+            if snapshot.name.startswith(".") or not snapshot.is_dir() or snapshot.is_symlink():
                 continue
             worlds_root = snapshot / "SaveGames" / "0"
             world_ids = (
@@ -89,7 +97,7 @@ def list_backups(save_root: Path, sync_backup_root: Path) -> dict[str, object]:
                 if not root.is_dir():
                     continue
                 for backup in root.iterdir():
-                    if backup.is_dir() and not backup.is_symlink():
+                    if not backup.name.startswith(".") and backup.is_dir() and not backup.is_symlink():
                         rows.append(_backup_row(backup, source, [world.name]))
             for backup in world.parent.glob(f"{world.name}.before-box-plan-*"):
                 if backup.is_dir() and not backup.is_symlink():
@@ -97,12 +105,23 @@ def list_backups(save_root: Path, sync_backup_root: Path) -> dict[str, object]:
 
     rows.sort(key=lambda row: str(row["created_at"]), reverse=True)
     counts = {source: sum(row["source"] == source for row in rows) for source in SOURCE_LABELS}
+    review_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    review_rows = [
+        row for row in rows
+        if not row["protected"] and datetime.fromisoformat(str(row["created_at"])) < review_cutoff
+    ]
     return {
         "backups": rows,
         "count": len(rows),
         "total_size_bytes": sum(int(row["size_bytes"]) for row in rows),
         "counts": counts,
         "read_only": True,
+        "retention": {
+            "protected_count": sum(bool(row["protected"]) for row in rows),
+            "review_after_days": 30,
+            "review_count": len(review_rows),
+            "review_size_bytes": sum(int(row["size_bytes"]) for row in review_rows),
+        },
     }
 
 
@@ -224,4 +243,36 @@ def restore_backup(
         "after_sha256": sha256(target / "Level.sav"),
         "safety_backup_path": str(safety_root),
         "restored": True,
+    }
+
+
+def delete_backup(
+    backup_id: str,
+    expected_created_at: str,
+    expected_size_bytes: int,
+    save_root: Path,
+    sync_backup_root: Path,
+) -> dict[str, object]:
+    backup = _find_backup(backup_id, save_root, sync_backup_root)
+    if backup["protected"]:
+        raise ValueError(f"恢复前安全快照在 {backup['protected_until']} 前受保护")
+    if backup["created_at"] != expected_created_at or int(backup["size_bytes"]) != expected_size_bytes:
+        raise ValueError("备份内容或时间已变化，请重新扫描后再删除")
+    path = Path(str(backup["path"]))
+    if not path.is_dir() or path.is_symlink():
+        raise ValueError("备份目录不存在或无效")
+
+    quarantine = path.parent / f".{path.name}.paledit-deleting-{uuid.uuid4().hex}"
+    os.replace(path, quarantine)
+    try:
+        shutil.rmtree(quarantine)
+    except Exception:
+        if quarantine.exists() and not path.exists():
+            os.replace(quarantine, path)
+        raise
+    return {
+        "backup_id": backup_id,
+        "backup_name": backup["name"],
+        "freed_bytes": backup["size_bytes"],
+        "deleted": True,
     }
