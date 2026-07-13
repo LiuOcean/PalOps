@@ -7,6 +7,12 @@
 - 使用 Palworld 1.0 实档完成兼容性诊断；
 - 只读加载 `CharacterSaveParameterMap`，避开当前已知不兼容的 1.0 地图对象解析器；
 - 浏览器本地界面，不上传存档；
+- 可从 SSH 主机 `palworld-server` 拉取最新 `SaveGames` 数据；下载会先进入临时目录并通过存档发现校验，再替换本地 `Save`，原数据保存在 `.paledit-backups`；
+- 提供 palworld-server 服务状态、在线玩家与白名单 RCON 运维工具，支持保存、广播、踢出、封禁、计划关服和安全重启；
+- 提供服务器配置可视化查看、筛选、编辑与 JSON 导出；保存会校验远端版本、备份并原子更新 Compose，密码和凭据字段不会返回浏览器；
+- 配置重启采用两阶段确认：首次勾选后申请短期一次性令牌，弹窗二次确认后才保存世界、重启容器并等待健康恢复；
+- 配置项以中文名称和实际作用说明为主，Compose 环境变量名仅作为辅助诊断信息；
+- RCON 指令、玩家 UID 与倒计时均由下拉菜单生成，不提供任意命令或 ID 输入框；
 - 展示当前世界用户、属性数据及其拥有的帕鲁，并可安全修改用户基础字段。
 - 内置 Palworld 1.0 道具内部 ID 中文索引，可按中文名或 ID 搜索。
 - 内置帕鲁 `CharacterID` 中文索引，包含普通、Boss、Raid、塔主和任务变体。
@@ -30,6 +36,10 @@ uv run paledit inspect Save/SaveGames/0/00000000000000000000000000000000
 ## 安全边界
 
 每次修改都会校验读取时的 SHA-256、完整备份世界、写入临时文件、重新解析，最后才原子替换 `Level.sav`。macOS 上读取当前 `PlM/Oodle`，写入使用 Palworld 仍支持的 `PlZ/zlib` 容器；内部 GVAS 字段继续使用 Palworld 原始名称、枚举、GUID 和数值类型。
+
+项目兼容层补齐了固定版本 `palworld-save-tools` 遗漏的 Map `Int64Property` 读写分支，可解析 Palworld 1.0 的 `LevelObjectRecoverPartySaveData.PlayerLastUsedTimes`，并保持相同类型安全回写。
+
+服务器运维接口只接受后端白名单动作。玩家操作会再次读取在线列表并验证所选 UID；安全重启固定执行 `Save` 后再发送带预设倒计时的 `Shutdown`，不会拼接或执行浏览器提供的任意命令。RCON 密码保留在 palworld-server 容器内，不会返回到浏览器。
 
 ## 更新道具索引
 

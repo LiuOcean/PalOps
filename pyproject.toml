@@ -20,6 +20,7 @@ dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
 
 [project.scripts]
 paledit = "paledit.cli:main"
+paledit-box-job = "paledit.box_job:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/paledit"]

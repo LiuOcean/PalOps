@@ -9,7 +9,7 @@ from typing import Any
 
 from .pals import load_pal_index
 from .items import load_item_index
-from .parser import character_custom_properties, open_world
+from .parser import character_custom_properties, locate_item_container_objects, open_world, open_world_with_raw
 from .save import sha256
 
 
@@ -83,7 +83,7 @@ def player_file_data(world_path: Path, player_uid: str) -> dict[str, object]:
 
 
 def inventory_containers(gvas: Any) -> dict[str, list[dict[str, object]]]:
-    item_names = {row["id"]: row["name_zh"] for row in load_item_index()["items"]}
+    item_data = {row["id"]: row for row in load_item_index()["items"]}
     rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
     result: dict[str, list[dict[str, object]]] = {}
     for container in rows:
@@ -93,13 +93,68 @@ def inventory_containers(gvas: Any) -> dict[str, list[dict[str, object]]]:
         for slot in slots:
             raw = slot["RawData"]["value"]
             item_id = str(raw["item"]["static_id"])
+            item = item_data.get(item_id, {})
             result[container_id].append({
                 "slot_index": int(raw["slot_index"]),
                 "item_id": item_id,
-                "name_zh": item_names.get(item_id, item_id),
+                "name_zh": item.get("name_zh", item_id),
+                "icon_url": item.get("icon_url", ""),
+                "category": item.get("category", "其他"),
+                "description": item.get("description", "未知或未收录的 Palworld 内部道具。"),
                 "count": int(raw["count"]),
             })
     return result
+
+
+def list_storage_containers(world_path: Path) -> dict[str, object]:
+    from palworld_save_tools.archive import FArchiveWriter
+
+    world_path = world_path.expanduser().resolve()
+    gvas, _, raw_gvas = open_world_with_raw(world_path / "Level.sav")
+    rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
+    containers = inventory_containers(gvas)
+    metadata: dict[str, dict[str, object]] = {}
+    encoded_ids: dict[bytes, str] = {}
+    for row in rows:
+        container_id = guid_of(row["key"].get("ID"))
+        writer = FArchiveWriter()
+        writer.guid(container_id)
+        encoded_ids[writer.bytes()] = container_id
+        metadata[container_id] = {
+            "slot_capacity": int(value_of(row["value"].get("SlotNum"), 0)),
+            "slots": containers.get(container_id, []),
+        }
+    objects = locate_item_container_objects(raw_gvas, encoded_ids)
+    storage_markers = ("ItemChest", "Refrigerator", "CoolerBox", "FoodBox", "DeathPenaltyStorage")
+    type_names = {
+        "ItemChest_01": "木制箱",
+        "ItemChest_02": "金属箱",
+        "ItemChest_03": "精炼金属箱",
+        "ItemChest_04": "高等文明箱",
+    }
+    result = []
+    for item in objects:
+        if not any(marker in str(item["object_id"]) for marker in storage_markers):
+            continue
+        detail = metadata.get(str(item["container_id"]))
+        if detail is None:
+            continue
+        slots = detail["slots"]
+        result.append({
+            **item,
+            **detail,
+            "type_name": type_names.get(str(item["object_id"]), str(item["object_id"])),
+            "occupied_slots": sum(1 for slot in slots if slot["item_id"] != "None" and slot["count"] > 0),
+            "total_items": sum(slot["count"] for slot in slots if slot["item_id"] != "None"),
+        })
+    result.sort(key=lambda row: (not bool(row["label"]), str(row["label"]), str(row["object_id"]), str(row["container_id"])))
+    return {
+        "world_id": world_path.name,
+        "level_sha256": sha256(world_path / "Level.sav"),
+        "containers": result,
+        "count": len(result),
+        "labeled_count": sum(bool(row["label"]) for row in result),
+    }
 
 
 def status_points(prop: dict[str, Any] | None) -> dict[str, int]:
@@ -304,4 +359,59 @@ def update_inventory_slot(world_path: Path, player_uid: str, category: str, slot
     backup_root = _write_world(world_path, gvas)
     result = list_users(world_path)
     result["backup_path"] = str(backup_root)
+    return result
+
+
+def grant_inventory_items(
+    world_path: Path,
+    player_uid: str,
+    category: str,
+    items: dict[str, int],
+    expected_sha256: str,
+) -> dict[str, object]:
+    """Add item stacks without replacing occupied inventory slots."""
+    world_path = world_path.expanduser().resolve()
+    level_path = world_path / "Level.sav"
+    if sha256(level_path) != expected_sha256:
+        raise ValueError("Level.sav 已变化，请重新加载后再发放")
+    valid_items = {str(row["id"]) for row in load_item_index()["items"]}
+    unknown = sorted(set(items) - valid_items)
+    if unknown:
+        raise ValueError(f"Palworld 不存在道具 ID：{', '.join(unknown)}")
+    grants = {item_id: max(1, min(999999, int(count))) for item_id, count in items.items()}
+
+    ids = player_inventory_ids(world_path, player_uid)
+    if category not in ids:
+        raise ValueError(f"用户没有该容器：{category}")
+    gvas, _ = open_world(level_path)
+    rows = gvas.properties["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
+    target_id = ids[category]
+    target = next((row for row in rows if guid_of(row["key"].get("ID")) == target_id), None)
+    if target is None:
+        raise ValueError(f"没有找到容器：{category}")
+    slots = target["value"].get("Slots", {}).get("value", {}).get("values", [])
+    if not slots:
+        raise ValueError(f"容器没有可复用的槽位结构：{category}")
+    capacity = int(value_of(target["value"].get("SlotNum"), len(slots)))
+    occupied = {int(slot["RawData"]["value"]["slot_index"]) for slot in slots}
+    free = [index for index in range(capacity) if index not in occupied]
+    if len(free) < len(grants):
+        raise ValueError(f"{category} 空槽不足：需要 {len(grants)}，实际 {len(free)}")
+
+    added: dict[str, int] = {}
+    template = slots[0]
+    for slot_index, (item_id, count) in zip(free, grants.items(), strict=False):
+        slot = copy.deepcopy(template)
+        raw = slot["RawData"]["value"]
+        raw["slot_index"] = slot_index
+        raw["item"]["static_id"] = item_id
+        raw["count"] = count
+        slots.append(slot)
+        added[item_id] = slot_index
+    slots.sort(key=lambda slot: int(slot["RawData"]["value"]["slot_index"]))
+
+    backup_root = _write_world(world_path, gvas)
+    result = list_users(world_path)
+    result["backup_path"] = str(backup_root)
+    result["granted_slots"] = added
     return result

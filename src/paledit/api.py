@@ -8,8 +8,12 @@ from . import __version__
 from .items import get_item, search_items
 from .pals import search_pals
 from .parser import load_character_data
+from .remote import (
+    get_server_config, get_server_status, list_online_players, prepare_server_restart,
+    pull_latest_save, restart_server, run_server_action, update_server_config,
+)
 from .save import InvalidSaveError, discover_worlds, sha256
-from .world import list_users, update_inventory_slot, update_user
+from .world import list_storage_containers, list_users, update_inventory_slot, update_user
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = PACKAGE_ROOT / "static"
@@ -56,6 +60,83 @@ def worlds(root: str = Query(default=str(DEFAULT_SAVE_ROOT))) -> dict[str, objec
     return {"root": str(Path(root).expanduser().resolve()), "worlds": [item.dump() for item in items]}
 
 
+@app.post("/api/save/pull")
+def pull_save() -> dict[str, object]:
+    try:
+        return pull_latest_save(DEFAULT_SAVE_ROOT)
+    except (InvalidSaveError, OSError, RuntimeError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/status")
+def server_status() -> dict[str, object]:
+    try:
+        return get_server_status()
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/players")
+def server_players() -> dict[str, object]:
+    try:
+        players = list_online_players()
+        return {"players": players, "count": len(players)}
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.post("/api/server/actions")
+def server_action(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        if payload.get("confirmed") is not True:
+            raise ValueError("请先确认本次服务器操作")
+        return run_server_action(
+            str(payload.get("action", "")),
+            message=payload.get("message"),
+            seconds=payload.get("seconds"),
+            player_uid=payload.get("player_uid"),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/config")
+def server_config() -> dict[str, object]:
+    try:
+        return get_server_config()
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.put("/api/server/config")
+def save_server_config(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        return update_server_config(dict(payload.get("updates") or {}), str(payload.get("expected_revision") or ""))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.post("/api/server/restart/prepare")
+def server_restart_prepare() -> dict[str, object]:
+    return prepare_server_restart()
+
+
+@app.post("/api/server/restart")
+def server_restart(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        if payload.get("confirmed") is not True:
+            raise ValueError("请完成第二次重启确认")
+        return restart_server(str(payload.get("confirmation_token") or ""))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
 @app.get("/api/world/inspect")
 def inspect_world(path: str) -> dict[str, object]:
     world = Path(path).expanduser().resolve()
@@ -80,6 +161,14 @@ def users(path: str) -> dict[str, object]:
         return list_users(Path(path))
     except Exception as error:
         raise HTTPException(status_code=422, detail=f"读取用户失败：{error}") from error
+
+
+@app.get("/api/world/containers")
+def containers(path: str) -> dict[str, object]:
+    try:
+        return list_storage_containers(Path(path))
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"读取箱子失败：{error}") from error
 
 
 @app.patch("/api/world/users/{player_uid}")
