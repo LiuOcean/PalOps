@@ -26,6 +26,10 @@ const guildsNode = document.querySelector('#guilds');
 const guildSummary = document.querySelector('#guild-summary');
 const guildQuery = document.querySelector('#guild-query');
 const guildDetail = document.querySelector('#guild-detail');
+const worldSearchQuery = document.querySelector('#world-search-query');
+const worldSearchSummary = document.querySelector('#world-search-summary');
+const worldSearchResults = document.querySelector('#world-search-results');
+const worldSearchDetail = document.querySelector('#world-search-detail');
 let activeWorld = null;
 let activeWorldHash = null;
 let loadedUsers = [];
@@ -35,6 +39,8 @@ let loadedContainers = [];
 let selectedContainerId = null;
 let loadedGuilds = [];
 let selectedGuildId = null;
+let loadedSearchResults = [];
+let selectedSearchKey = null;
 let discoveredWorlds = [];
 let mapData = null;
 let selectedMapPlayerId = null;
@@ -54,6 +60,7 @@ const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 let serverContextRequest = null;
 const ROUTES = {
   overview: {page:'overview', root:'overview'},
+  'world/search': {page:'saves', root:'world', resource:'search'},
   'world/containers': {page:'saves', root:'world', resource:'containers'},
   'world/players': {page:'saves', root:'world', resource:'users'},
   'world/guilds': {page:'saves', root:'world', resource:'guilds'},
@@ -287,7 +294,7 @@ function beginBackupDelete(backup) {
 
 function showResourceTab(name, {fromRoute = false} = {}) {
   if (!fromRoute) {
-    const route = {containers:'world/containers', users:'world/players', guilds:'world/guilds'}[name];
+    const route = {search:'world/search', containers:'world/containers', users:'world/players', guilds:'world/guilds'}[name];
     if (route && currentRoute() !== route) { navigate(route); return; }
   }
   document.querySelectorAll('[data-resource-tab]').forEach(button => {
@@ -297,12 +304,14 @@ function showResourceTab(name, {fromRoute = false} = {}) {
     button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-resource-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.resourcePane !== name));
-  const resources = {containers: loadedContainers, users: loadedUsers, guilds: loadedGuilds};
+  const resources = {search: loadedSearchResults, containers: loadedContainers, users: loadedUsers, guilds: loadedGuilds};
   const hasData = resources[name]?.length || 0;
-  document.querySelector('#resource-empty').classList.toggle('hidden', Boolean(hasData));
+  document.querySelector('#resource-empty').classList.toggle('hidden', name === 'search' || Boolean(hasData));
+  worldSearchDetail.classList.toggle('hidden', name !== 'search');
   document.querySelector('#container-detail').classList.toggle('hidden', name !== 'containers');
   document.querySelector('#player-detail').classList.toggle('hidden', name !== 'users');
   document.querySelector('#guild-detail').classList.toggle('hidden', name !== 'guilds');
+  if (name === 'search' && hasData) selectWorldSearchResult(selectedSearchKey || searchResultKey(loadedSearchResults[0]));
   if (name === 'containers' && hasData) selectContainer(selectedContainerId || loadedContainers[0].container_id);
   if (name === 'users' && hasData) selectUser(selectedUserId || loadedUsers[0].player_uid);
   if (name === 'guilds' && hasData) selectGuild(selectedGuildId || loadedGuilds[0].guild_id);
@@ -689,7 +698,7 @@ function renderWorld(world) {
       document.querySelector('#overview-attention').textContent = data.warnings.length ? `${data.warnings.length} 项解析提示` : '无需介入';
       document.querySelector('#resource-empty').classList.add('hidden');
       const route = currentRoute();
-      if (["world/containers", "world/players", "world/guilds"].includes(route)) applyRoute(route);
+      if (["world/search", "world/containers", "world/players", "world/guilds"].includes(route)) applyRoute(route);
       else navigate("world/containers");
     } catch (error) {
       result.className = 'result error'; result.textContent = error.message;
@@ -722,6 +731,8 @@ function hydrateWorldSnapshot(data) {
   loadedContainers = data.containers || [];
   loadedUsers = data.users || [];
   loadedGuilds = data.guilds || [];
+  loadedSearchResults = [];
+  selectedSearchKey = null;
   containerPanel.classList.remove('hidden'); guildPanel.classList.remove('hidden');
   containerSummary.textContent = `${loadedContainers.length} 个物品容器 · ${loadedContainers.filter(row => row.label).length} 个带标签 · 只读展示`;
   guildSummary.textContent = `${loadedGuilds.length} 个公会 · ${loadedGuilds.reduce((count, row) => count + row.base_count, 0)} 个据点 · 只读展示`;
@@ -729,6 +740,120 @@ function hydrateWorldSnapshot(data) {
     selectedGuildId = loadedGuilds.find(guild => guild.players.some(player => player.player_uid.toLowerCase() === OWNER_PLAYER_UID))?.guild_id || loadedGuilds[0]?.guild_id;
   }
   renderUserNavigation(); renderContainers(); renderGuilds();
+  if (worldSearchQuery.value.trim()) loadWorldSearch(worldSearchQuery.value);
+}
+
+function searchResultKey(result) {
+  const identity = result.kind === 'item' ? result.item_id : result.instance_id;
+  return `${result.kind}:${identity}:${result.container_id || ''}:${result.slot_index}`;
+}
+
+async function loadWorldSearch(query = worldSearchQuery.value) {
+  const normalized = query.trim();
+  if (!normalized) {
+    loadedSearchResults = [];
+    selectedSearchKey = null;
+    worldSearchSummary.textContent = '搜索所有玩家背包、储物箱和帕鲁容器';
+    worldSearchResults.innerHTML = '<div class="search-intro"><i class="ph ph-binoculars" aria-hidden="true"></i><strong>一次找遍整个世界</strong><p>结果会标明玩家、背包分类、储物箱、帕鲁终端或队伍位置。</p></div>';
+    worldSearchDetail.innerHTML = '<div class="detail-empty"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><strong>选择一条搜索结果</strong><p>这里会显示精确位置、数量或帕鲁资料。</p></div>';
+    return;
+  }
+  if (!activeWorld) {
+    worldSearchResults.innerHTML = '<div class="empty">请先打开一个世界存档</div>';
+    return;
+  }
+  const needle = normalized.toLocaleLowerCase('zh-CN');
+  const matches = (...values) => values.filter(Boolean).join(' ').toLocaleLowerCase('zh-CN').includes(needle);
+  const results = [];
+  for (const user of loadedUsers) {
+    const ownerName = user.nickname || '未命名玩家';
+    for (const [inventoryName, slots] of Object.entries(user.inventories || {})) {
+      for (const slot of slots) {
+        if (slot.item_id === 'None' || Number(slot.count) <= 0 || !matches(slot.name_zh, slot.item_id, slot.category, slot.description)) continue;
+        results.push({...slot, kind:'item', location_kind:'player_inventory', location_label:`${ownerName} · ${inventoryName}`, owner_name:ownerName, owner_player_uid:user.player_uid, inventory_name:inventoryName, container_id:user.inventory_container_ids?.[inventoryName] || ''});
+      }
+    }
+    for (const pal of user.pals || []) {
+      const skills = (pal.passive_skills || []).flatMap(skill => [skill.skill_id, skill.name_zh, skill.description]);
+      if (!matches(pal.name_zh, pal.character_id, pal.nickname, ...skills)) continue;
+      results.push({...pal, kind:'pal', location_kind:'player_pal', location_label:`${ownerName} · ${pal.location_type || '其他帕鲁容器'}`, owner_name:ownerName, owner_player_uid:user.player_uid});
+    }
+  }
+  for (const container of loadedContainers) {
+    const containerName = container.label || container.type_name || '未命名储物箱';
+    for (const slot of container.slots || []) {
+      if (slot.item_id === 'None' || Number(slot.count) <= 0 || !matches(slot.name_zh, slot.item_id, slot.category, slot.description)) continue;
+      results.push({...slot, kind:'item', location_kind:'storage_container', location_label:containerName, container_id:container.container_id, container_type:container.type_name, object_id:container.object_id});
+    }
+  }
+  results.sort((left, right) => `${left.name_zh} ${left.location_label} ${left.kind}`.localeCompare(`${right.name_zh} ${right.location_label} ${right.kind}`, 'zh-CN'));
+  const itemCount = results.filter(result => result.kind === 'item').length;
+  const palCount = results.length - itemCount;
+  loadedSearchResults = results.slice(0, 500);
+  worldSearchSummary.textContent = `${results.length} 个位置 · ${itemCount} 个道具堆 · ${palCount} 只帕鲁${results.length > 500 ? ' · 显示前 500 个' : ''}`;
+  renderWorldSearchResults();
+}
+
+function renderWorldSearchResults() {
+  worldSearchResults.innerHTML = '';
+  for (const result of loadedSearchResults) {
+    const key = searchResultKey(result);
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'resource-row world-search-row'; row.dataset.searchKey = key;
+    row.classList.toggle('active', key === selectedSearchKey);
+    const image = document.createElement('span'); image.className = 'search-result-image';
+    if (result.icon_url) {
+      const img = document.createElement('img'); img.src = result.icon_url; img.alt = ''; img.loading = 'lazy'; image.append(img);
+    } else image.innerHTML = `<i class="ph ${result.kind === 'pal' ? 'ph-paw-print' : 'ph-package'}" aria-hidden="true"></i>`;
+    const copy = document.createElement('span'); copy.className = 'resource-row-copy';
+    const name = document.createElement('strong'); name.textContent = result.nickname ? `${result.name_zh} · ${result.nickname}` : result.name_zh;
+    const location = document.createElement('small'); location.textContent = result.location_label;
+    copy.append(name, location);
+    const value = document.createElement('span'); value.className = 'search-result-value';
+    value.textContent = result.kind === 'item' ? `× ${Number(result.count).toLocaleString()}` : `Lv.${result.level}`;
+    row.append(image, copy, value);
+    row.addEventListener('click', () => selectWorldSearchResult(key));
+    worldSearchResults.append(row);
+  }
+  if (!loadedSearchResults.length) worldSearchResults.innerHTML = '<div class="empty">没有在玩家背包、储物箱或帕鲁容器中找到匹配内容</div>';
+  if (loadedSearchResults.length && !loadedSearchResults.some(result => searchResultKey(result) === selectedSearchKey)) {
+    selectWorldSearchResult(searchResultKey(loadedSearchResults[0]));
+  }
+}
+
+function selectWorldSearchResult(key) {
+  selectedSearchKey = key;
+  const result = loadedSearchResults.find(row => searchResultKey(row) === key);
+  [...worldSearchResults.querySelectorAll('.world-search-row')].forEach(row => row.classList.toggle('active', row.dataset.searchKey === key));
+  worldSearchDetail.innerHTML = '';
+  if (!result) return;
+  const article = document.createElement('article'); article.className = 'search-result-detail';
+  const head = document.createElement('header');
+  const title = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = result.kind === 'item' ? '道具位置' : '帕鲁位置';
+  const name = document.createElement('h2'); name.textContent = result.nickname ? `${result.name_zh} · ${result.nickname}` : result.name_zh;
+  const id = document.createElement('code'); id.textContent = result.kind === 'item' ? result.item_id : result.character_id;
+  title.append(eyebrow, name, id);
+  const image = document.createElement('span'); image.className = 'search-detail-image';
+  if (result.icon_url) { const img = document.createElement('img'); img.src = result.icon_url; img.alt = ''; image.append(img); }
+  else image.innerHTML = `<i class="ph ${result.kind === 'pal' ? 'ph-paw-print' : 'ph-package'}" aria-hidden="true"></i>`;
+  head.append(title, image);
+  const facts = document.createElement('dl'); facts.className = 'search-detail-facts';
+  facts.append(detailRow('所在位置', result.location_label));
+  facts.append(detailRow('槽位', Number(result.slot_index) >= 0 ? String(Number(result.slot_index) + 1) : '未知'));
+  if (result.kind === 'item') {
+    facts.append(detailRow('数量', Number(result.count).toLocaleString()), detailRow('分类', result.category || '其他'));
+  } else {
+    facts.append(detailRow('等级', `Lv.${result.level}`), detailRow('归属玩家', result.owner_name), detailRow('实例 ID', result.instance_id, true));
+  }
+  const actions = document.createElement('div'); actions.className = 'search-detail-actions';
+  const open = document.createElement('button'); open.className = 'primary'; open.innerHTML = '<i class="ph ph-arrow-square-out" aria-hidden="true"></i> 打开所在位置';
+  open.addEventListener('click', () => {
+    if (result.location_kind === 'storage_container') { navigate('world/containers'); selectContainer(result.container_id); }
+    else { navigate('world/players'); selectUser(result.owner_player_uid); }
+  });
+  actions.append(open);
+  article.append(head, facts, actions); worldSearchDetail.append(article);
+  openMobileWorldDetail();
 }
 
 async function loadContainers() {
@@ -1866,6 +1991,11 @@ skillQuery.addEventListener('input', () => {
   skillSearchTimer = setTimeout(() => loadSkills(skillQuery.value), 180);
 });
 containerQuery.addEventListener('input', renderContainers);
+let worldSearchTimer;
+worldSearchQuery.addEventListener('input', () => {
+  clearTimeout(worldSearchTimer);
+  worldSearchTimer = setTimeout(() => loadWorldSearch(worldSearchQuery.value), 220);
+});
 document.querySelector('#reload-containers').addEventListener('click', loadContainers);
 guildQuery.addEventListener('input', renderGuilds);
 document.querySelector('#reload-guilds').addEventListener('click', loadGuilds);

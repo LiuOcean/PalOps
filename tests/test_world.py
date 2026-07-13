@@ -1,7 +1,9 @@
 import shutil
 from pathlib import Path
 
-from paledit.world import grant_inventory_items, list_storage_containers, list_users, update_inventory_slot, update_user
+from paledit.world import (
+    grant_inventory_items, list_storage_containers, list_users, search_world, update_inventory_slot, update_user,
+)
 
 ROOT = Path(__file__).parents[1]
 WORLD = next(path.parent for path in (ROOT / "Save" / "SaveGames" / "0").glob("*/Level.sav"))
@@ -20,6 +22,32 @@ def test_current_world_lists_storage_containers() -> None:
     result = list_storage_containers(WORLD)
     assert result["count"] > 0
     assert all(row["container_id"] and "slots" in row for row in result["containers"])
+
+
+def test_world_search_finds_items_and_pals_with_locations() -> None:
+    users = list_users(WORLD)["users"]
+    item = next(
+        slot
+        for user in users
+        for slots in user["inventories"].values()
+        for slot in slots
+        if slot["item_id"] != "None" and slot["count"] > 0
+    )
+    item_result = search_world(WORLD, item["item_id"])
+    assert item_result["item_match_count"] > 0
+    assert all(row["location_label"] for row in item_result["results"])
+    assert any(row["kind"] == "item" and row["item_id"] == item["item_id"] for row in item_result["results"])
+
+    pal = next(pal for user in users for pal in user["pals"])
+    pal_result = search_world(WORLD, pal["character_id"])
+    assert pal_result["pal_match_count"] > 0
+    assert any(
+        row["kind"] == "pal"
+        and row["character_id"] == pal["character_id"]
+        and row["owner_player_uid"]
+        and row["location_label"]
+        for row in pal_result["results"]
+    )
 
 
 def test_user_update_round_trips_in_copy(tmp_path: Path) -> None:

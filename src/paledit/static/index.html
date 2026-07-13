@@ -14,7 +14,7 @@
       <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span></div>
       <nav class="main-nav" aria-label="主导航">
         <button data-route="overview" data-nav-root="overview"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与关注事项</small></span></button>
-        <button data-route="world/containers" data-nav-root="world" class="active"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>存档、玩家与备份</small></span></button>
+        <button data-route="world/search" data-nav-root="world" class="active"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>搜索、玩家与备份</small></span></button>
         <button data-route="map" data-nav-root="map"><i class="ph ph-map-trifold" aria-hidden="true"></i><span><strong>地图</strong><small>玩家与公会据点</small></span></button>
         <button data-route="manage/players" data-nav-root="manage"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>管理</strong><small>在线、规则与维护</small></span></button>
         <button data-route="catalog/items" data-nav-root="catalog"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>图鉴</strong><small>道具、帕鲁与技能</small></span></button>
@@ -39,6 +39,7 @@
           <div class="freshness"><span><i class="ph ph-circle" aria-hidden="true"></i> 数据来源：palworld-server</span><button id="pull-save" class="primary"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 从服务器同步</button></div>
         </header>
         <nav class="section-nav world-nav" aria-label="世界工作区">
+          <button data-route="world/search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i>全局搜索</button>
           <button data-route="world/containers"><i class="ph ph-archive" aria-hidden="true"></i>储物箱</button>
           <button data-route="world/players"><i class="ph ph-users" aria-hidden="true"></i>玩家</button>
           <button data-route="world/guilds"><i class="ph ph-buildings" aria-hidden="true"></i>公会</button>
@@ -57,10 +58,16 @@
 
           <section class="resource-column">
             <div class="resource-tabs" role="tablist" aria-label="世界资源类型">
+              <button data-resource-tab="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i> 全局搜索</button>
               <button class="active" data-resource-tab="containers"><i class="ph ph-archive" aria-hidden="true"></i> 储物箱</button>
               <button data-resource-tab="users"><i class="ph ph-users" aria-hidden="true"></i> 玩家</button>
               <button data-resource-tab="guilds"><i class="ph ph-buildings" aria-hidden="true"></i> 公会</button>
             </div>
+            <section id="world-search-panel" class="resource-pane hidden" data-resource-pane="search">
+              <div class="resource-toolbar world-search-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">全局搜索道具或帕鲁</span><input id="world-search-query" type="search" autocomplete="off" placeholder="输入道具、帕鲁名称或内部 ID"></label></div>
+              <p id="world-search-summary" class="resource-summary">搜索所有玩家背包、储物箱和帕鲁容器</p>
+              <div id="world-search-results" class="resource-list world-search-results"><div class="search-intro"><i class="ph ph-binoculars" aria-hidden="true"></i><strong>一次找遍整个世界</strong><p>结果会标明玩家、背包分类、储物箱、帕鲁终端或队伍位置。</p></div></div>
+            </section>
             <section id="container-panel" class="resource-pane hidden" data-resource-pane="containers">
               <div class="resource-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索储物箱</span><input id="container-query" type="search" placeholder="搜索储物箱或道具"></label><button id="reload-containers" class="icon-button" title="重新读取储物箱"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">重新读取</span></button></div>
               <p id="container-summary" class="resource-summary">打开世界后读取储物箱</p>
@@ -80,6 +87,7 @@
 
           <section class="detail-column" aria-live="polite">
             <button id="mobile-world-back" class="mobile-world-back secondary"><i class="ph ph-arrow-left" aria-hidden="true"></i> 返回列表</button>
+            <section id="world-search-detail" class="world-search-detail hidden"><div class="detail-empty"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><strong>选择一条搜索结果</strong><p>这里会显示精确位置、数量或帕鲁资料。</p></div></section>
             <div id="container-detail" class="container-detail"><div class="detail-empty"><i class="ph ph-archive" aria-hidden="true"></i><strong>选择一个储物箱</strong><p>道具、数量和技术信息将在这里展示。</p></div></div>
             <section id="player-detail" class="player-detail hidden"><div class="detail-empty"><i class="ph ph-user-circle" aria-hidden="true"></i><strong>选择一名玩家</strong><p>基础资料、背包和帕鲁会在这里展开。</p></div></section>
             <section id="guild-detail" class="guild-detail hidden"><div class="detail-empty"><i class="ph ph-buildings" aria-hidden="true"></i><strong>选择一个公会</strong><p>会长、成员与据点位置会在这里展开。</p></div></section>

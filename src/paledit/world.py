@@ -209,8 +209,7 @@ def load_player_gvas(world_path: Path, player_uid: str):
     return player_path, GvasFile.read(raw, PALWORLD_TYPE_HINTS, {}), save_type
 
 
-def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
-    _, gvas, _ = load_player_gvas(world_path, player_uid)
+def _player_inventory_ids(gvas: Any) -> dict[str, str]:
     save = gvas.properties["SaveData"]["value"]
     info = save["InventoryInfo"]["value"]
     labels = {
@@ -221,6 +220,29 @@ def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
         "FoodEquipContainerId": "食物装备",
     }
     return {label: guid_of(info[key]["value"]["ID"]) for key, label in labels.items() if key in info}
+
+
+def player_inventory_ids(world_path: Path, player_uid: str) -> dict[str, str]:
+    _, gvas, _ = load_player_gvas(world_path, player_uid)
+    return _player_inventory_ids(gvas)
+
+
+def _player_pal_container_ids(gvas: Any) -> dict[str, str]:
+    save = gvas.properties["SaveData"]["value"]
+    labels = {
+        "OtomoCharacterContainerId": "队伍",
+        "PalStorageContainerId": "帕鲁终端",
+    }
+    return {
+        label: guid_of(save[key]["value"].get("ID"))
+        for key, label in labels.items()
+        if key in save
+    }
+
+
+def player_pal_container_ids(world_path: Path, player_uid: str) -> dict[str, str]:
+    _, gvas, _ = load_player_gvas(world_path, player_uid)
+    return _player_pal_container_ids(gvas)
 
 
 def player_file_data(world_path: Path, player_uid: str) -> dict[str, object]:
@@ -404,6 +426,8 @@ def list_users(world_path: Path, snapshot: WorldSnapshot | None = None) -> dict[
                 continue
             character_id = str(value_of(param.get("CharacterID"), ""))
             pal_meta = get_pal(character_id) or {}
+            slot_id = value_of(param.get("SlotId"), {})
+            pal_container_id = guid_of(slot_id.get("ContainerId", {}).get("value", {}).get("ID"))
             pals_by_owner.setdefault(owner, []).append({
                 "instance_id": instance_id,
                 "character_id": character_id,
@@ -416,19 +440,112 @@ def list_users(world_path: Path, snapshot: WorldSnapshot | None = None) -> dict[
                 "is_boss": bool(value_of(param.get("IsBoss"), False)),
                 "is_lucky": bool(value_of(param.get("IsRarePal"), False)),
                 "is_tower": character_id.casefold().startswith("gym_"),
+                "container_id": pal_container_id,
+                "slot_index": int(value_of(slot_id.get("SlotIndex"), -1)),
                 **pal_readonly_details(param),
             })
     for uid, user in users.items():
         user["pals"] = sorted(pals_by_owner.get(uid, []), key=lambda pal: (str(pal["name_zh"]), str(pal["instance_id"])))
         user["pal_count"] = len(user["pals"])
         try:
-            ids = player_inventory_ids(world_path, uid)
-            user.update(player_file_data(world_path, uid))
+            player_path, player_gvas, _ = load_player_gvas(world_path, uid)
+            ids = _player_inventory_ids(player_gvas)
+            pal_ids = _player_pal_container_ids(player_gvas)
+            player_save = player_gvas.properties["SaveData"]["value"]
+            user.update({
+                "player_file": str(player_path.relative_to(world_path)),
+                "player_file_sha256": sha256(player_path),
+                "technology_points": int(value_of(player_save.get("TechnologyPoint"), 0)),
+                "boss_technology_points": int(value_of(player_save.get("bossTechnologyPoint"), 0)),
+            })
             user["inventories"] = {label: containers.get(container_id, []) for label, container_id in ids.items()}
             user["inventory_container_ids"] = ids
+            user["pal_container_ids"] = pal_ids
+            pal_labels = {container_id: label for label, container_id in pal_ids.items()}
+            for pal in user["pals"]:
+                pal["location_type"] = pal_labels.get(pal["container_id"], "其他帕鲁容器")
         except (FileNotFoundError, KeyError):
             user["inventories"] = {}
     return {"world_id": world_path.name, "level_sha256": snapshot.level_sha256, "users": list(users.values())}
+
+
+def search_world(world_path: Path, query: str, limit: int = 500) -> dict[str, object]:
+    """Find item stacks and owned pals across every readable world location."""
+    world_path = world_path.expanduser().resolve()
+    snapshot = get_world_snapshot(world_path / "Level.sav")
+    users = list_users(world_path, snapshot)["users"]
+    containers = list_storage_containers(world_path, snapshot)["containers"]
+    needle = query.strip().casefold()
+
+    item_matches: list[dict[str, object]] = []
+    pal_matches: list[dict[str, object]] = []
+
+    def matches(*values: object) -> bool:
+        return bool(needle) and needle in " ".join(str(value) for value in values if value is not None).casefold()
+
+    for user in users:
+        owner_name = str(user.get("nickname") or "未命名玩家")
+        owner_uid = str(user["player_uid"])
+        for inventory_name, slots in dict(user.get("inventories") or {}).items():
+            container_id = dict(user.get("inventory_container_ids") or {}).get(inventory_name, "")
+            for slot in slots:
+                if slot["item_id"] == "None" or int(slot["count"]) <= 0:
+                    continue
+                if matches(slot["name_zh"], slot["item_id"], slot["category"], slot["description"]):
+                    item_matches.append({
+                        **slot,
+                        "location_kind": "player_inventory",
+                        "location_label": f"{owner_name} · {inventory_name}",
+                        "owner_name": owner_name,
+                        "owner_player_uid": owner_uid,
+                        "inventory_name": inventory_name,
+                        "container_id": container_id,
+                    })
+        for pal in list(user.get("pals") or []):
+            skills = [
+                value
+                for skill in list(pal.get("passive_skills") or [])
+                for value in (skill.get("skill_id"), skill.get("name_zh"), skill.get("description"))
+            ]
+            if matches(pal["name_zh"], pal["character_id"], pal.get("nickname"), *skills):
+                location_type = str(pal.get("location_type") or "其他帕鲁容器")
+                pal_matches.append({
+                    **pal,
+                    "location_kind": "player_pal",
+                    "location_label": f"{owner_name} · {location_type}",
+                    "owner_name": owner_name,
+                    "owner_player_uid": owner_uid,
+                })
+
+    for container in containers:
+        container_name = str(container.get("label") or container.get("type_name") or "未命名储物箱")
+        for slot in list(container.get("slots") or []):
+            if slot["item_id"] == "None" or int(slot["count"]) <= 0:
+                continue
+            if matches(slot["name_zh"], slot["item_id"], slot["category"], slot["description"]):
+                item_matches.append({
+                    **slot,
+                    "location_kind": "storage_container",
+                    "location_label": container_name,
+                    "container_id": container["container_id"],
+                    "container_type": container["type_name"],
+                    "object_id": container["object_id"],
+                })
+
+    item_matches.sort(key=lambda row: (str(row["name_zh"]), str(row["location_label"]), int(row["slot_index"])))
+    pal_matches.sort(key=lambda row: (str(row["name_zh"]), str(row["location_label"]), int(row["slot_index"])))
+    all_matches = [{"kind": "item", **row} for row in item_matches] + [{"kind": "pal", **row} for row in pal_matches]
+    all_matches.sort(key=lambda row: (str(row["name_zh"]), str(row["location_label"]), str(row["kind"])))
+    return {
+        "world_id": world_path.name,
+        "level_sha256": snapshot.level_sha256,
+        "query": query.strip(),
+        "item_match_count": len(item_matches),
+        "pal_match_count": len(pal_matches),
+        "match_count": len(all_matches),
+        "results": all_matches[:limit],
+        "truncated": len(all_matches) > limit,
+    }
 
 
 def world_snapshot_payload(world_path: Path) -> dict[str, object]:

@@ -17,7 +17,8 @@ from .remote import (
 from .save import InvalidSaveError, discover_worlds
 from .skills import search_skills
 from .world import (
-    list_guilds, list_storage_containers, list_users, update_inventory_slot, update_user, world_snapshot_payload,
+    list_guilds, list_storage_containers, list_users, search_world, update_inventory_slot, update_user,
+    world_snapshot_payload,
 )
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -253,6 +254,18 @@ def containers(path: str) -> dict[str, object]:
         return list_storage_containers(Path(path))
     except Exception as error:
         raise HTTPException(status_code=422, detail=f"读取箱子失败：{error}") from error
+
+
+@app.get("/api/world/search")
+def world_search(
+    path: str,
+    q: str = Query(min_length=1),
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> dict[str, object]:
+    try:
+        return search_world(Path(path), q, limit)
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"全局搜索失败：{error}") from error
 
 
 @app.get("/api/world/guilds")
