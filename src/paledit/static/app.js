@@ -26,6 +26,8 @@ let onlinePlayers = [];
 let loadedContainers = [];
 let serverConfig = null;
 let restartConfirmationToken = null;
+const SERVER_CONTEXT_REFRESH_MS = 15_000;
+let serverContextRequest = null;
 
 function showView(name) {
   document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
@@ -180,30 +182,42 @@ function playerCopyButton(text, label, className = 'copy-button') {
   return button;
 }
 
-async function loadServerContext() {
-  const state = document.querySelector('#server-state');
-  const rcon = document.querySelector('#rcon-state');
-  state.className = 'status-pill loading'; state.textContent = '读取中';
-  rcon.className = 'connection-state loading'; rcon.textContent = '检查中';
-  try {
-    const [statusResponse, playersResponse] = await Promise.all([fetch('/api/server/status'), fetch('/api/server/players')]);
-    const status = await statusResponse.json();
-    const playerData = await playersResponse.json();
-    if (!statusResponse.ok) throw new Error(status.detail || '服务器状态读取失败');
-    if (!playersResponse.ok) throw new Error(playerData.detail || 'RCON 玩家列表读取失败');
-    state.className = `status-pill ${status.online ? '' : 'offline'}`.trim();
-    state.textContent = status.online ? '在线' : '离线';
-    document.querySelector('#server-health').textContent = status.health;
-    document.querySelector('#restart-policy').textContent = status.restart_policy;
-    rcon.className = 'connection-state'; rcon.textContent = 'RCON 已连接';
-    onlinePlayers = playerData.players;
-    renderOnlinePlayers();
-  } catch (error) {
-    state.className = 'status-pill offline'; state.textContent = '不可用';
-    rcon.className = 'connection-state offline'; rcon.textContent = 'RCON 未连接';
-    document.querySelector('#online-players').textContent = error.message;
-    document.querySelector('#players-page-list').textContent = error.message;
-  }
+function loadServerContext({showLoading = true} = {}) {
+  if (serverContextRequest) return serverContextRequest;
+  serverContextRequest = (async () => {
+    const state = document.querySelector('#server-state');
+    const rcon = document.querySelector('#rcon-state');
+    if (showLoading) {
+      state.className = 'status-pill loading'; state.textContent = '读取中';
+      rcon.className = 'connection-state loading'; rcon.textContent = '检查中';
+    }
+    try {
+      const [statusResponse, playersResponse] = await Promise.all([fetch('/api/server/status'), fetch('/api/server/players')]);
+      const status = await statusResponse.json();
+      const playerData = await playersResponse.json();
+      if (!statusResponse.ok) throw new Error(status.detail || '服务器状态读取失败');
+      if (!playersResponse.ok) throw new Error(playerData.detail || 'RCON 玩家列表读取失败');
+      state.className = `status-pill ${status.online ? '' : 'offline'}`.trim();
+      state.textContent = status.online ? '在线' : '离线';
+      document.querySelector('#server-health').textContent = status.health;
+      document.querySelector('#restart-policy').textContent = status.restart_policy;
+      rcon.className = 'connection-state'; rcon.textContent = 'RCON 已连接';
+      onlinePlayers = playerData.players;
+      renderOnlinePlayers();
+    } catch (error) {
+      state.className = 'status-pill offline'; state.textContent = '不可用';
+      rcon.className = 'connection-state offline'; rcon.textContent = 'RCON 未连接';
+      document.querySelector('#online-players').textContent = error.message;
+      document.querySelector('#players-page-list').textContent = error.message;
+    } finally {
+      serverContextRequest = null;
+    }
+  })();
+  return serverContextRequest;
+}
+
+function refreshServerContextInBackground() {
+  if (!document.hidden) void loadServerContext({showLoading: false});
 }
 
 function renderOnlinePlayers() {
@@ -545,7 +559,6 @@ document.querySelectorAll('[data-jump]').forEach(button => button.addEventListen
 }));
 document.querySelectorAll('[data-operation-tab]').forEach(button => button.addEventListener('click', () => showOperationTab(button.dataset.operationTab)));
 
-document.querySelector('#refresh-server').addEventListener('click', loadServerContext);
 document.querySelector('#reload-config').addEventListener('click', loadServerConfig);
 document.querySelector('#config-query').addEventListener('input', () => { if (serverConfig) renderServerConfig(); });
 document.querySelector('#save-config').addEventListener('click', saveServerConfig);
@@ -651,3 +664,5 @@ scan();
 loadItems();
 loadPals();
 loadServerContext();
+window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
+document.addEventListener('visibilitychange', refreshServerContextInBackground);
