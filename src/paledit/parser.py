@@ -10,7 +10,7 @@ from typing import Any
 CHARACTER_RAW_PATH = ".worldSaveData.CharacterSaveParameterMap.Value.RawData"
 ITEM_CONTAINER_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.RawData"
 ITEM_SLOT_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.Slots.Slots.RawData"
-PARSER_REVISION = "paledit-1.0-v0.12-compat-1"
+PARSER_REVISION = "paledit-1.0-v0.12-compat-2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +174,35 @@ def _localized_strings(data: bytes, start: int, end: int) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _container_id_prefixes(container_ids: dict[bytes, str]) -> dict[int, list[tuple[bytes, str]]]:
+    """Index fixed-width GUID bytes by a cheap four-byte prefix."""
+    prefixes: dict[int, list[tuple[bytes, str]]] = {}
+    for encoded, container_id in container_ids.items():
+        prefix = struct.unpack_from("<I", encoded)[0]
+        prefixes.setdefault(prefix, []).append((encoded, container_id))
+    return prefixes
+
+
+def _container_matches(
+    data: bytes,
+    start: int,
+    end: int,
+    prefixes: dict[int, list[tuple[bytes, str]]],
+) -> dict[bytes, str]:
+    """Find known GUIDs in one small module window with a single byte scan."""
+    matches: dict[bytes, str] = {}
+    for position in range(start, end - 3):
+        candidates = prefixes.get(struct.unpack_from("<I", data, position)[0])
+        if candidates is None:
+            continue
+        for encoded, container_id in candidates:
+            if data.startswith(encoded, position, end):
+                matches[encoded] = container_id
+        if len(matches) > 1:
+            break
+    return matches
+
+
 def locate_item_container_objects(raw_gvas: bytes, container_ids: dict[bytes, str]) -> list[dict[str, object]]:
     """Associate map objects with item-container GUIDs without decoding map raw payloads.
 
@@ -182,6 +211,7 @@ def locate_item_container_objects(raw_gvas: bytes, container_ids: dict[bytes, st
     """
     map_marker = struct.pack("<i", len("MapObjectId") + 1) + b"MapObjectId\x00"
     module_marker = b"EPalMapObjectConcreteModelModuleType::ItemContainer\x00"
+    prefixes = _container_id_prefixes(container_ids)
     results: list[dict[str, object]] = []
     cursor = 0
     while True:
@@ -196,17 +226,13 @@ def locate_item_container_objects(raw_gvas: bytes, container_ids: dict[bytes, st
             object_id = _map_object_id(raw_gvas, start)
         except (UnicodeDecodeError, struct.error):
             continue
-        matches = [
-            (raw_gvas.find(encoded, module, module + 640), container_id)
-            for encoded, container_id in container_ids.items()
-        ]
-        matches = [(position, container_id) for position, container_id in matches if position >= 0]
+        matches = _container_matches(raw_gvas, module, min(len(raw_gvas), module + 640), prefixes)
         if len(matches) != 1:
             continue
         labels = _localized_strings(raw_gvas, start, module)
         results.append({
             "object_id": object_id,
-            "container_id": matches[0][1],
+            "container_id": next(iter(matches.values())),
             "label": labels[-1] if labels else "",
             "labels": labels,
         })
