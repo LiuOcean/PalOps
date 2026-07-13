@@ -10,7 +10,7 @@ from .map import get_map_config
 from .pals import search_pals
 from .parser import load_character_data
 from .remote import (
-    get_server_config, get_server_status, list_online_players, prepare_server_restart,
+    get_server_config, get_server_metrics, get_server_status, list_online_players, prepare_server_restart,
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 from .save import InvalidSaveError, discover_worlds, sha256
@@ -88,6 +88,14 @@ def server_players() -> dict[str, object]:
     try:
         players = list_online_players()
         return {"players": players, "count": len(players)}
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/metrics")
+def server_metrics() -> dict[str, int | float | None]:
+    try:
+        return get_server_metrics()
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 

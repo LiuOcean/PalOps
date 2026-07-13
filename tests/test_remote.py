@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from paledit.remote import (
-    _compose_environment, _parse_players, get_server_config, list_online_players, prepare_server_restart,
+    _compose_environment, _parse_players, get_server_config, get_server_metrics, list_online_players, prepare_server_restart,
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 
@@ -120,6 +120,51 @@ def test_online_players_expose_rest_api_locations(monkeypatch: pytest.MonkeyPatc
         "location_x": -123.5,
         "location_y": 456.25,
     }]
+
+
+@pytest.mark.parametrize("payload", [{}, {"players": None}, {"players": []}])
+def test_online_players_treat_missing_or_empty_players_as_no_one_online(
+    payload: dict[str, object], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = subprocess.CompletedProcess([], 0, stdout=json.dumps(payload), stderr="")
+    monkeypatch.setattr("paledit.remote._ssh", lambda arguments: completed)
+
+    assert list_online_players() == []
+
+
+def test_server_metrics_normalizes_official_rest_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "serverfps": 59,
+        "serverframetime": 16.72,
+        "currentplayernum": 0,
+        "maxplayernum": 32,
+        "uptime": 3661,
+        "basecampnum": 13,
+        "days": 204,
+    }
+    completed = subprocess.CompletedProcess([], 0, stdout=json.dumps(payload), stderr="")
+    monkeypatch.setattr("paledit.remote._ssh", lambda arguments: completed)
+
+    assert get_server_metrics() == {
+        "server_fps": 59.0,
+        "frame_time_ms": 16.72,
+        "current_players": 0,
+        "max_players": 32,
+        "uptime_seconds": 3661,
+        "base_camps": 13,
+        "world_days": 204,
+    }
+
+
+def test_server_metrics_allows_optional_newer_fields_to_be_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    completed = subprocess.CompletedProcess([], 0, stdout='{"currentplayernum": 0}', stderr="")
+    monkeypatch.setattr("paledit.remote._ssh", lambda arguments: completed)
+
+    result = get_server_metrics()
+
+    assert result["current_players"] == 0
+    assert result["base_camps"] is None
+    assert result["world_days"] is None
 
 
 def test_safe_restart_builds_only_whitelisted_commands(monkeypatch: pytest.MonkeyPatch):

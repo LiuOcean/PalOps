@@ -47,6 +47,10 @@ const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 let serverContextRequest = null;
 
+function playersFromResponse(payload) {
+  return Array.isArray(payload?.players) ? payload.players : [];
+}
+
 function showView(name) {
   document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('hidden', page.dataset.page !== name));
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
@@ -233,6 +237,33 @@ function playerCopyButton(text, label, className = 'copy-button') {
   return button;
 }
 
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds)) return '—';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days} 天 ${hours} 小时`;
+  if (hours) return `${hours} 小时 ${minutes} 分`;
+  return `${minutes} 分钟`;
+}
+
+function renderServerMetrics(metrics, error = '') {
+  const value = (id, text) => { document.querySelector(id).textContent = text; };
+  if (!metrics) {
+    for (const id of ['#metric-fps', '#metric-frame-time', '#metric-players', '#metric-uptime', '#metric-bases', '#metric-days']) value(id, '—');
+    value('#metrics-updated', error || 'REST 指标暂不可用');
+    return;
+  }
+  value('#metric-fps', Number.isFinite(metrics.server_fps) ? metrics.server_fps.toFixed(0) : '—');
+  value('#metric-frame-time', Number.isFinite(metrics.frame_time_ms) ? `${metrics.frame_time_ms.toFixed(2)} ms` : '—');
+  const current = Number.isFinite(metrics.current_players) ? metrics.current_players : onlinePlayers.length;
+  value('#metric-players', Number.isFinite(metrics.max_players) ? `${current} / ${metrics.max_players}` : String(current));
+  value('#metric-uptime', formatUptime(metrics.uptime_seconds));
+  value('#metric-bases', Number.isFinite(metrics.base_camps) ? String(metrics.base_camps) : '—');
+  value('#metric-days', Number.isFinite(metrics.world_days) ? `第 ${metrics.world_days} 天` : '—');
+  value('#metrics-updated', `官方 REST · ${new Date().toLocaleTimeString('zh-CN', {hour12:false})}`);
+}
+
 function loadServerContext({showLoading = true} = {}) {
   if (serverContextRequest) return serverContextRequest;
   serverContextRequest = (async () => {
@@ -243,18 +274,25 @@ function loadServerContext({showLoading = true} = {}) {
       rcon.className = 'connection-state loading'; rcon.textContent = '检查中';
     }
     try {
-      const [statusResponse, playersResponse] = await Promise.all([fetch('/api/server/status'), fetch('/api/server/players')]);
+      const [statusResponse, playersResponse, metricsResponse] = await Promise.all([
+        fetch('/api/server/status'), fetch('/api/server/players'), fetch('/api/server/metrics'),
+      ]);
       const status = await statusResponse.json();
       const playerData = await playersResponse.json();
+      const metricsData = await metricsResponse.json();
       if (!statusResponse.ok) throw new Error(status.detail || '服务器状态读取失败');
       if (!playersResponse.ok) throw new Error(playerData.detail || 'RCON 玩家列表读取失败');
       state.className = `status-pill ${status.online ? '' : 'offline'}`.trim();
       state.textContent = status.online ? '在线' : '离线';
       document.querySelector('#server-health').textContent = status.health;
       document.querySelector('#restart-policy').textContent = status.restart_policy;
+      document.querySelector('#overview-state-title').textContent = status.online ? '服务器连接正常' : '服务器当前离线';
+      document.querySelector('#overview-state-copy').textContent = status.online ? '容器、玩家接口与管理链路均可访问。' : '容器未处于可服务状态，请检查运行日志。';
+      document.querySelector('#overview-health-icon').classList.toggle('offline', !status.online);
       rcon.className = 'connection-state'; rcon.textContent = 'RCON 已连接';
-      onlinePlayers = playerData.players;
+      onlinePlayers = playersFromResponse(playerData);
       renderOnlinePlayers();
+      renderServerMetrics(metricsResponse.ok ? metricsData : null, metricsData.detail);
       if (mapData) {
         syncMapPlayersFromServer(onlinePlayers);
         renderMapPlayers();
@@ -264,6 +302,10 @@ function loadServerContext({showLoading = true} = {}) {
     } catch (error) {
       state.className = 'status-pill offline'; state.textContent = '不可用';
       rcon.className = 'connection-state offline'; rcon.textContent = 'RCON 未连接';
+      document.querySelector('#overview-state-title').textContent = '服务器状态不可用';
+      document.querySelector('#overview-state-copy').textContent = error.message;
+      document.querySelector('#overview-health-icon').classList.add('offline');
+      renderServerMetrics(null, error.message);
       document.querySelector('#online-players').textContent = error.message;
       document.querySelector('#players-page-list').textContent = error.message;
     } finally {
@@ -596,7 +638,7 @@ function mapPosition(location) {
 }
 
 function serverPlayersForMap(players) {
-  return players.flatMap(player => {
+  return (Array.isArray(players) ? players : []).flatMap(player => {
     if (player.location_x === null || player.location_x === undefined || player.location_y === null || player.location_y === undefined) return [];
     const x = Number(player.location_x);
     const y = Number(player.location_y);
@@ -986,7 +1028,7 @@ async function loadWorldMap() {
       const playerData = await playersResponse.json();
       if (!mapResponse.ok) throw new Error(data.detail || '地图数据读取失败');
       if (!playersResponse.ok) throw new Error(playerData.detail || '服务器玩家位置读取失败');
-      onlinePlayers = playerData.players;
+      onlinePlayers = playersFromResponse(playerData);
       renderOnlinePlayers();
       if (!guildData.warning) {
         loadedGuilds = guildData.guilds;

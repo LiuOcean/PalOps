@@ -357,6 +357,9 @@ def list_online_players() -> list[dict[str, object]]:
     ])
     try:
         payload = json.loads(result.stdout)
+        raw_players = payload.get("players") or []
+        if not isinstance(raw_players, list):
+            raise TypeError("players is not a list")
         return [{
             "name": str(player.get("name") or "未命名玩家"),
             "player_uid": str(player.get("playerId") or ""),
@@ -365,9 +368,37 @@ def list_online_players() -> list[dict[str, object]]:
             "level": str(player.get("level") or ""),
             "location_x": _finite_float(player.get("location_x")),
             "location_y": _finite_float(player.get("location_y")),
-        } for player in payload.get("players", []) if player.get("userId")]
-    except (TypeError, ValueError) as error:
+        } for player in raw_players if isinstance(player, dict) and player.get("userId")]
+    except (AttributeError, TypeError, ValueError) as error:
         raise RuntimeError("无法解析 palworld-server 在线玩家列表") from error
+
+
+def get_server_metrics() -> dict[str, int | float | None]:
+    """Read the official Palworld REST metrics without exposing credentials."""
+    result = _ssh([
+        REMOTE_DOCKER, "exec", SERVER_CONTAINER, "sh", "-lc",
+        'curl -fsS --max-time 10 -u "admin:$ADMIN_PASSWORD" http://127.0.0.1:8212/v1/api/metrics',
+    ])
+    try:
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise TypeError("metrics is not an object")
+
+        def integer(key: str) -> int | None:
+            value = _finite_float(payload.get(key))
+            return None if value is None else max(0, int(value))
+
+        return {
+            "server_fps": _finite_float(payload.get("serverfps")),
+            "frame_time_ms": _finite_float(payload.get("serverframetime")),
+            "current_players": integer("currentplayernum"),
+            "max_players": integer("maxplayernum"),
+            "uptime_seconds": integer("uptime"),
+            "base_camps": integer("basecampnum"),
+            "world_days": integer("days"),
+        }
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("无法解析 palworld-server 服务器指标") from error
 
 
 def run_server_action(
