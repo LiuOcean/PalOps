@@ -1,5 +1,7 @@
 <div align="center">
 
+✨ 由 GPT-5.6 Vibe Coding 驱动
+
 # PalOps
 
 一个用来管理 Palworld 1.0 专用服务器、只读查看存档的中文 Web 工具。
