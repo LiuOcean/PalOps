@@ -181,6 +181,13 @@
         <section class="panel chat-panel">
           <div class="chat-toolbar"><div class="chat-channel"><span class="chat-channel-icon"><i class="ph ph-globe-hemisphere-east" aria-hidden="true"></i></span><div><h2>世界频道</h2><p id="chat-status" aria-live="polite">正在读取本地记录并同步服务器…</p></div></div><div class="chat-tools"><label class="chat-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索聊天</span><input id="chat-query" type="search" placeholder="搜索玩家或消息"></label><button id="refresh-chat" class="icon-button" title="立即同步" aria-label="立即同步"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i></button></div></div>
           <div id="chat-messages" class="chat-messages"><div class="empty">正在加载聊天记录…</div></div>
+          <div class="chat-compose-area">
+            <form id="chat-composer" class="chat-composer">
+              <label class="chat-compose-field"><i class="ph ph-megaphone" aria-hidden="true"></i><span class="sr-only">系统消息</span><input id="chat-message-input" type="text" maxlength="200" autocomplete="off" placeholder="输入要向在线玩家发送的系统消息"></label>
+              <button id="send-chat-message" class="primary" type="submit" disabled><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>发送</button>
+            </form>
+            <div class="chat-compose-meta"><span id="chat-send-status" aria-live="polite">消息将通过服务器系统广播发送</span><span id="chat-message-count">0 / 200</span></div>
+          </div>
           <footer class="chat-footer"><span id="chat-storage"><i class="ph ph-database" aria-hidden="true"></i> 本地归档准备中</span><span><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 5 秒自动同步</span></footer>
         </section>
       </section>

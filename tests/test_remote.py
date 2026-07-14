@@ -181,6 +181,16 @@ def test_safe_restart_builds_only_whitelisted_commands(monkeypatch: pytest.Monke
     assert [row["command"] for row in result["results"]] == ["Save", "Shutdown"]
 
 
+def test_broadcast_builds_only_the_system_message_command(monkeypatch: pytest.MonkeyPatch):
+    commands = []
+    monkeypatch.setattr("paledit.remote._rcon", lambda command, timeout=20: commands.append(command) or "ok")
+
+    result = run_server_action("broadcast", message="  欢迎来到服务器  ")
+
+    assert commands == ["Broadcast 欢迎来到服务器"]
+    assert result == {"action": "broadcast", "results": [{"command": "Broadcast", "response": "ok"}]}
+
+
 def test_player_action_rejects_an_id_not_from_online_player_list(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "paledit.remote.list_online_players",

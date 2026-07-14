@@ -1,7 +1,8 @@
 import subprocess
 from pathlib import Path
 
-from paledit.chat import parse_chat_logs, sync_chat_history
+from paledit import api
+from paledit.chat import archive_system_message, parse_chat_logs, sync_chat_history
 
 
 LOGS = """2026-07-13T17:33:01.588701253Z [2026-07-14 01:33:00] [CHAT] <测试会长> 。。。。？
@@ -59,3 +60,40 @@ def test_sync_chat_history_returns_local_messages_when_remote_is_unavailable(tmp
     assert result["stored_count"] == 2
     assert result["warning"] == "palworld-server 不可用"
     assert len(result["messages"]) == 2
+
+
+def test_archive_system_message_is_visible_in_local_chat_history(tmp_path: Path, monkeypatch):
+    database = tmp_path / "chat.sqlite3"
+    monkeypatch.setattr(
+        "paledit.chat._ssh",
+        lambda arguments, timeout=30: subprocess.CompletedProcess(arguments, 0, stdout="", stderr=""),
+    )
+
+    archived = archive_system_message(database, "  欢迎   来到服务器  ")
+    result = sync_chat_history(database)
+
+    assert archived["player_name"] == "系统"
+    assert archived["message"] == "欢迎 来到服务器"
+    assert result["messages"] == [archived]
+
+
+def test_broadcast_api_archives_the_successfully_sent_message(tmp_path: Path, monkeypatch):
+    database = tmp_path / "chat.sqlite3"
+    monkeypatch.setattr(api, "DEFAULT_CHAT_DB", database)
+    monkeypatch.setattr(
+        api,
+        "run_server_action",
+        lambda action, **kwargs: {
+            "action": action,
+            "results": [{"command": "Broadcast", "response": "ok"}],
+        },
+    )
+
+    result = api.server_action({
+        "action": "broadcast",
+        "message": "服务器维护完成",
+        "confirmed": True,
+    })
+
+    assert result["archived_message"]["player_name"] == "系统"
+    assert result["archived_message"]["message"] == "服务器维护完成"

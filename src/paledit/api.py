@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .backups import delete_backup, list_backups, prepare_backup_restore, restore_backup
-from .chat import DEFAULT_CHAT_DB, sync_chat_history
+from .chat import DEFAULT_CHAT_DB, archive_system_message, sync_chat_history
 from .items import get_item, search_items
 from .map import get_map_config
 from .metrics_history import (
@@ -224,12 +224,22 @@ def server_action(payload: dict = Body(...)) -> dict[str, object]:
     try:
         if payload.get("confirmed") is not True:
             raise ValueError("请先确认本次服务器操作")
-        return run_server_action(
-            str(payload.get("action", "")),
+        action = str(payload.get("action", ""))
+        result = run_server_action(
+            action,
             message=payload.get("message"),
             seconds=payload.get("seconds"),
             player_uid=payload.get("player_uid"),
         )
+        if action == "broadcast":
+            try:
+                result["archived_message"] = archive_system_message(
+                    DEFAULT_CHAT_DB,
+                    str(payload.get("message") or ""),
+                )
+            except (OSError, sqlite3.Error) as error:
+                result["archive_warning"] = f"系统消息已发送，但写入本地聊天归档失败：{error}"
+        return result
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except RuntimeError as error:

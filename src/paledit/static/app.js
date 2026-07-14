@@ -73,6 +73,7 @@ const catalogStates = {
 let serverContextRequest = null;
 let chatRequest = null;
 let chatData = null;
+let chatBroadcastSending = false;
 let serverHistory = null;
 let historyHours = 24;
 let historyRequest = null;
@@ -155,7 +156,10 @@ function applyRoute(route = currentRoute()) {
   if (state.page === 'config' && !serverConfig) loadServerConfig();
   if (state.page === 'backups' && !backupData) loadBackups();
   if (state.page === 'map') loadWorldMap();
-  if (state.page === 'chat') void loadChat();
+  if (state.page === 'chat') {
+    if (chatData) renderChat({forceBottom: true});
+    void loadChat();
+  }
 }
 
 function showView(name) {
@@ -804,12 +808,12 @@ function refreshServerContextInBackground() {
   }
 }
 
-function renderChat() {
+function renderChat({forceBottom = false} = {}) {
   const root = document.querySelector('#chat-messages');
   const status = document.querySelector('#chat-status');
   const storage = document.querySelector('#chat-storage');
   if (!root || !chatData) return;
-  const keepAtBottom = root.scrollHeight - root.scrollTop - root.clientHeight < 80;
+  const keepAtBottom = forceBottom || root.scrollHeight - root.scrollTop - root.clientHeight < 80;
   const query = document.querySelector('#chat-query').value.trim().toLocaleLowerCase('zh-CN');
   const rows = (chatData.messages || []).filter(row => !query || `${row.player_name} ${row.message}`.toLocaleLowerCase('zh-CN').includes(query));
   root.innerHTML = '';
@@ -878,6 +882,56 @@ function refreshChatInBackground() {
 
 function persistChatInBackground() {
   if (!document.hidden && currentRoute() !== 'manage/chat') void loadChat({showLoading: false});
+}
+
+function syncChatComposer() {
+  const input = document.querySelector('#chat-message-input');
+  const button = document.querySelector('#send-chat-message');
+  document.querySelector('#chat-message-count').textContent = `${input.value.length} / 200`;
+  button.disabled = chatBroadcastSending || !input.value.trim();
+}
+
+async function sendChatBroadcast() {
+  const input = document.querySelector('#chat-message-input');
+  const status = document.querySelector('#chat-send-status');
+  const message = input.value.trim();
+  if (!message || chatBroadcastSending) return;
+
+  chatBroadcastSending = true;
+  input.disabled = true;
+  status.textContent = '正在发送系统消息…';
+  status.className = '';
+  syncChatComposer();
+  try {
+    const response = await fetch('/api/server/actions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'broadcast', message, confirmed:true}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '系统消息发送失败');
+    input.value = '';
+    if (chatData && data.archived_message) {
+      const messages = chatData.messages || [];
+      if (!messages.some(row => row.id === data.archived_message.id)) {
+        chatData.messages = [...messages, data.archived_message];
+        chatData.stored_count += 1;
+      }
+      renderChat({forceBottom: true});
+    } else {
+      void loadChat({showLoading: false});
+    }
+    status.textContent = data.archive_warning || '系统消息已发送并显示在消息栏';
+    status.className = data.archive_warning ? 'error' : 'ok';
+  } catch (error) {
+    status.textContent = error.message;
+    status.className = 'error';
+  } finally {
+    chatBroadcastSending = false;
+    input.disabled = false;
+    syncChatComposer();
+    input.focus();
+  }
 }
 
 function renderOnlinePlayers() {
@@ -2767,6 +2821,8 @@ document.querySelectorAll('[data-quick-action]').forEach(button => button.addEve
 syncAdvancedForm();
 document.querySelector('#refresh-chat').addEventListener('click', () => loadChat());
 document.querySelector('#chat-query').addEventListener('input', renderChat);
+document.querySelector('#chat-message-input').addEventListener('input', syncChatComposer);
+document.querySelector('#chat-composer').addEventListener('submit', event => { event.preventDefault(); void sendChatBroadcast(); });
 window.addEventListener('hashchange', () => applyRoute());
 document.querySelectorAll('[data-history-hours]').forEach(button => button.addEventListener('click', () => {
   historyHours = Number(button.dataset.historyHours);

@@ -4,6 +4,7 @@ import hashlib
 import re
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .remote import REMOTE_DOCKER, SERVER_CONTAINER, _ssh
@@ -90,6 +91,31 @@ def _stored_messages(connection: sqlite3.Connection, limit: int) -> list[dict[st
         (limit,),
     ).fetchall()
     return [dict(row) for row in reversed(rows)]
+
+
+def archive_system_message(path: Path, message: str) -> dict[str, str]:
+    clean_message = " ".join(message.split()).strip()
+    if not clean_message:
+        raise ValueError("系统消息不能为空")
+
+    now = datetime.now().astimezone()
+    logged_at = now.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    row = {
+        "id": hashlib.sha256(f"system\0{logged_at}\0{clean_message}".encode()).hexdigest(),
+        "logged_at": logged_at,
+        "game_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "player_name": "系统",
+        "message": clean_message,
+    }
+    with _SYNC_LOCK, _connect(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO chat_messages(id, logged_at, game_at, player_name, message)
+            VALUES (:id, :logged_at, :game_at, :player_name, :message)
+            """,
+            row,
+        )
+    return row
 
 
 def sync_chat_history(path: Path = DEFAULT_CHAT_DB, limit: int = 300) -> dict[str, object]:
