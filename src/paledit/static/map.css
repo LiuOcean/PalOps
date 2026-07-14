@@ -325,11 +325,12 @@
 
 .map-stage {
   grid-column: 1;
-  width: min(100%, calc(100dvh - 142px));
+  width: 100%;
+  height: calc(100dvh - 142px);
   min-width: 0;
-  min-height: 0;
+  min-height: 520px;
   justify-self: center;
-  aspect-ratio: 1;
+  aspect-ratio: auto;
   border-color: #68b7ff38;
   background: #050b09;
   box-shadow: 0 24px 70px #000b, inset 0 0 80px #071a13;
@@ -508,7 +509,7 @@
 
   .map-player-detail {
     grid-column: 1;
-    width: min(100%, calc(100dvh - 142px));
+    width: 100%;
     justify-self: center;
     max-height: none;
   }
@@ -531,6 +532,8 @@
 
   .map-stage {
     width: 100%;
+    height: min(72dvh, 720px);
+    min-height: 420px;
   }
 
   .map-stage-toolbar {

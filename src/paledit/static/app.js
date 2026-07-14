@@ -867,7 +867,7 @@ async function scan() {
       && currentRoute() !== 'world/backups'
       && !loadedContainers.length
     ) worldsNode.querySelector('.inspect')?.click();
-    if (!document.querySelector('[data-page="map"]').classList.contains('hidden')) loadWorldMap();
+    if (!document.querySelector('[data-page="map"]').classList.contains('hidden')) await ensureMapSaveData();
   } catch (error) {
     worldsNode.innerHTML = `<div class="empty">${error.message}</div>`;
   }
@@ -1318,25 +1318,30 @@ function syncMapPlayersFromServer(players) {
   syncMapSummary();
 }
 
-function updateMapOverlayPositions() {
+function mapViewportGeometry() {
   const stage = document.querySelector('#map-stage');
   const width = stage.clientWidth;
   const height = stage.clientHeight;
-  if (!width || !height) return;
+  return {width, height, planeSize: Math.max(width, height)};
+}
+
+function updateMapOverlayPositions() {
+  const {width, height, planeSize} = mapViewportGeometry();
+  if (!width || !height || !planeSize) return;
   const pixelRatio = window.devicePixelRatio || 1;
   const snap = value => Math.round(value * pixelRatio) / pixelRatio;
 
   document.querySelectorAll('.map-layer [data-map-left]').forEach(marker => {
     const mapLeft = Number(marker.dataset.mapLeft) / 100;
     const mapTop = Number(marker.dataset.mapTop) / 100;
-    const centerX = width / 2 + (mapLeft * width - width / 2) * mapView.zoom + mapView.panX;
-    const centerY = height / 2 + (mapTop * height - height / 2) * mapView.zoom + mapView.panY;
+    const centerX = width / 2 + (mapLeft * planeSize - planeSize / 2) * mapView.zoom + mapView.panX;
+    const centerY = height / 2 + (mapTop * planeSize - planeSize / 2) * mapView.zoom + mapView.panY;
     const offsetX = Number(marker.dataset.mapOffsetX || 0);
     const offsetY = Number(marker.dataset.mapOffsetY || 0);
 
     if (marker.dataset.mapWidth && marker.dataset.mapHeight) {
-      const rangeWidth = width * (Number(marker.dataset.mapWidth) / 100) * mapView.zoom;
-      const rangeHeight = height * (Number(marker.dataset.mapHeight) / 100) * mapView.zoom;
+      const rangeWidth = planeSize * (Number(marker.dataset.mapWidth) / 100) * mapView.zoom;
+      const rangeHeight = planeSize * (Number(marker.dataset.mapHeight) / 100) * mapView.zoom;
       marker.style.left = `${snap(centerX - rangeWidth / 2)}px`;
       marker.style.top = `${snap(centerY - rangeHeight / 2)}px`;
       marker.style.width = `${snap(rangeWidth)}px`;
@@ -1352,11 +1357,9 @@ function updateMapOverlayPositions() {
 }
 
 function clampMapPan() {
-  const stage = document.querySelector('#map-stage');
-  const width = stage.clientWidth;
-  const height = stage.clientHeight;
-  const maxX = Math.max(0, (width * (mapView.zoom - 1)) / 2);
-  const maxY = Math.max(0, (height * (mapView.zoom - 1)) / 2);
+  const {width, height, planeSize} = mapViewportGeometry();
+  const maxX = Math.max(0, (planeSize * mapView.zoom - width) / 2);
+  const maxY = Math.max(0, (planeSize * mapView.zoom - height) / 2);
   mapView.panX = Math.max(-maxX, Math.min(maxX, mapView.panX));
   mapView.panY = Math.max(-maxY, Math.min(maxY, mapView.panY));
 }
@@ -1393,13 +1396,12 @@ function renderMapTiles() {
   const level = desiredMapTileLevel();
   if (!config || level === null || !stage.clientWidth) return;
 
-  const width = stage.clientWidth;
-  const height = stage.clientHeight;
+  const {width, height, planeSize} = mapViewportGeometry();
   const columns = 2 ** level;
-  const planeLeft = ((-mapView.panX - width / 2) / mapView.zoom + width / 2) / width;
-  const planeRight = ((width - mapView.panX - width / 2) / mapView.zoom + width / 2) / width;
-  const planeTop = ((-mapView.panY - height / 2) / mapView.zoom + height / 2) / height;
-  const planeBottom = ((height - mapView.panY - height / 2) / mapView.zoom + height / 2) / height;
+  const planeLeft = ((-width / 2 - mapView.panX) / mapView.zoom + planeSize / 2) / planeSize;
+  const planeRight = ((width / 2 - mapView.panX) / mapView.zoom + planeSize / 2) / planeSize;
+  const planeTop = ((-height / 2 - mapView.panY) / mapView.zoom + planeSize / 2) / planeSize;
+  const planeBottom = ((height / 2 - mapView.panY) / mapView.zoom + planeSize / 2) / planeSize;
   const startX = Math.max(0, Math.floor(planeLeft * columns) - 1);
   const endX = Math.min(columns - 1, Math.floor(planeRight * columns) + 1);
   const startY = Math.max(0, Math.floor(planeTop * columns) - 1);
@@ -1434,10 +1436,10 @@ function renderMapTiles() {
         addedTile = true;
       }
 
-      const left = snap(width / 2 + ((x / columns) * width - width / 2) * mapView.zoom + mapView.panX);
-      const right = snap(width / 2 + (((x + 1) / columns) * width - width / 2) * mapView.zoom + mapView.panX);
-      const top = snap(height / 2 + ((y / columns) * height - height / 2) * mapView.zoom + mapView.panY);
-      const bottom = snap(height / 2 + (((y + 1) / columns) * height - height / 2) * mapView.zoom + mapView.panY);
+      const left = snap(width / 2 + ((x / columns) * planeSize - planeSize / 2) * mapView.zoom + mapView.panX);
+      const right = snap(width / 2 + (((x + 1) / columns) * planeSize - planeSize / 2) * mapView.zoom + mapView.panX);
+      const top = snap(height / 2 + ((y / columns) * planeSize - planeSize / 2) * mapView.zoom + mapView.panY);
+      const bottom = snap(height / 2 + (((y + 1) / columns) * planeSize - planeSize / 2) * mapView.zoom + mapView.panY);
       tile.style.left = `${left}px`;
       tile.style.top = `${top}px`;
       tile.style.width = `${right - left + 0.5 / pixelRatio}px`;
@@ -1448,7 +1450,6 @@ function renderMapTiles() {
   root.append(fragment);
   if (addedTile) setMapTileReady(false);
   updateMapTileReadiness(level);
-  document.querySelector('#map-quality').innerHTML = `<i class="ph ph-squares-four" aria-hidden="true"></i> z${level} · ${(config.tile_size * columns).toLocaleString()}px`;
 }
 
 function scheduleMapTiles() {
@@ -1458,8 +1459,15 @@ function scheduleMapTiles() {
 
 function updateMapTransform() {
   clampMapPan();
+  const {width, height, planeSize} = mapViewportGeometry();
   const transform = `translate(${mapView.panX}px, ${mapView.panY}px) scale(${mapView.zoom})`;
-  document.querySelector('#map-fallback-plane').style.transform = transform;
+  const fallback = document.querySelector('#map-fallback-plane');
+  fallback.style.inset = 'auto';
+  fallback.style.left = `${(width - planeSize) / 2}px`;
+  fallback.style.top = `${(height - planeSize) / 2}px`;
+  fallback.style.width = `${planeSize}px`;
+  fallback.style.height = `${planeSize}px`;
+  fallback.style.transform = transform;
   document.querySelector('#map-zoom-label').textContent = `${Math.round(mapView.zoom * 100)}%`;
   document.querySelector('#map-stage').classList.toggle('map-zoom-detail', mapView.zoom >= 2.2);
   updateMapOverlayPositions();
@@ -1491,10 +1499,11 @@ function resetMapView() {
 function mapWorldPositionAt(clientX, clientY) {
   if (!mapData) return null;
   const rect = document.querySelector('#map-stage').getBoundingClientRect();
+  const planeSize = Math.max(rect.width, rect.height);
   const centeredX = clientX - rect.left - rect.width / 2;
   const centeredY = clientY - rect.top - rect.height / 2;
-  const planeX = ((centeredX - mapView.panX) / mapView.zoom + rect.width / 2) / rect.width;
-  const planeY = ((centeredY - mapView.panY) / mapView.zoom + rect.height / 2) / rect.height;
+  const planeX = ((centeredX - mapView.panX) / mapView.zoom + planeSize / 2) / planeSize;
+  const planeY = ((centeredY - mapView.panY) / mapView.zoom + planeSize / 2) / planeSize;
   if (planeX < 0 || planeX > 1 || planeY < 0 || planeY > 1) return null;
   const bounds = mapData.landscape;
   const mapX = -planeY * 256;
@@ -1687,6 +1696,7 @@ function renderMapPlayerDetail(playerUid) {
   }
   const full = document.createElement('button'); full.className = 'primary'; full.textContent = '打开完整玩家详情';
   full.addEventListener('click', async () => {
+    document.querySelector('#map-detail-dialog').close();
     showView('saves'); showResourceTab('users');
     if (!loadedUsers.length) await loadUsers();
     selectUser(player.player_uid);
@@ -1724,6 +1734,7 @@ function renderMapBaseDetail(baseId) {
   actions.append(playerCopyButton(coordinates, '复制 XYZ 坐标', 'secondary'), playerCopyButton(base.base_id, '复制据点 GUID', 'secondary'));
   const full = document.createElement('button'); full.className = 'primary'; full.textContent = '打开公会详情';
   full.addEventListener('click', async () => {
+    document.querySelector('#map-detail-dialog').close();
     showView('saves'); showResourceTab('guilds');
     if (!loadedGuilds.length) await loadGuilds();
     selectGuild(base.guild_id);
@@ -1736,9 +1747,9 @@ function focusMapLocation(location, minimumZoom = 2.4) {
   if (!mapData) return;
   const position = mapPosition(location);
   mapView.zoom = Math.max(mapView.zoom, minimumZoom);
-  const size = document.querySelector('#map-stage').getBoundingClientRect();
-  mapView.panX = -((position.left - 50) / 100) * size.width * mapView.zoom;
-  mapView.panY = -((position.top - 50) / 100) * size.height * mapView.zoom;
+  const {planeSize} = mapViewportGeometry();
+  mapView.panX = -((position.left - 50) / 100) * planeSize * mapView.zoom;
+  mapView.panY = -((position.top - 50) / 100) * planeSize * mapView.zoom;
   updateMapTransform();
 }
 
@@ -1787,12 +1798,18 @@ function renderMapFocusResults() {
   root.classList.remove('hidden');
 }
 
+function openMapDetail() {
+  const dialog = document.querySelector('#map-detail-dialog');
+  if (!dialog.open) showModalWithFocus(dialog);
+}
+
 function selectMapPlayer(playerUid) {
   selectedMapPlayerId = playerUid;
   selectedMapBaseId = null;
   renderMapPlayers();
   renderBaseCampMarkers();
   renderMapPlayerDetail(playerUid);
+  openMapDetail();
 }
 
 function selectMapBase(baseId) {
@@ -1801,10 +1818,12 @@ function selectMapBase(baseId) {
   renderMapPlayers();
   renderBaseCampMarkers();
   renderMapBaseDetail(baseId);
+  openMapDetail();
 }
 
 async function loadWorldMap() {
   if (mapRequest) return mapRequest;
+  const requestedWorld = activeWorld;
   const empty = document.querySelector('#map-empty');
   const result = document.querySelector('#map-result');
   empty.classList.remove('hidden');
@@ -1813,8 +1832,8 @@ async function loadWorldMap() {
   result.textContent = '';
   mapRequest = (async () => {
     try {
-      const guildPromise = activeWorld
-        ? fetch(`/api/world/guilds?path=${encodeURIComponent(activeWorld)}`).then(async response => {
+      const guildPromise = requestedWorld
+        ? fetch(`/api/world/guilds?path=${encodeURIComponent(requestedWorld)}`).then(async response => {
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.detail || '存档据点读取失败');
             return payload;
@@ -1837,6 +1856,7 @@ async function loadWorldMap() {
         guilds: guildData.guilds,
         base_camps: guildBasesForMap(guildData.guilds),
         guild_warning: guildData.warning || '',
+        world_path: requestedWorld,
       };
       syncMapPlayersFromServer(onlinePlayers);
       renderFastTravelMarkers();
@@ -1861,6 +1881,16 @@ async function loadWorldMap() {
     } finally { mapRequest = null; }
   })();
   return mapRequest;
+}
+
+async function ensureMapSaveData() {
+  if (mapRequest) {
+    try { await mapRequest; } catch (_) { /* loadWorldMap 已负责展示错误。 */ }
+  }
+  if (!mapData || mapData.world_path !== activeWorld) {
+    mapData = null;
+    await loadWorldMap();
+  }
 }
 
 async function loadUsers() {
@@ -2479,7 +2509,7 @@ document.querySelector('#map-controls-close').addEventListener('click', () => {
   setMapControlsOpen(false);
   mapControlsToggle.focus();
 });
-setMapControlsOpen(!window.matchMedia('(max-width: 700px)').matches);
+setMapControlsOpen(false);
 mapStage.addEventListener('wheel', event => {
   event.preventDefault();
   setMapZoom(mapView.zoom + (event.deltaY < 0 ? 0.35 : -0.35), event);
