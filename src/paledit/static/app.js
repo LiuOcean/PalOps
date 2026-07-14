@@ -56,8 +56,6 @@ let mapTileFrame = null;
 let serverConfig = null;
 let backupData = null;
 let selectedBackupId = null;
-let pendingBackupRestore = null;
-let pendingBackupDelete = null;
 let restartConfirmationToken = null;
 const CHAT_BACKGROUND_REFRESH_MS = 30_000;
 const SIDEBAR_STORAGE_KEY = 'paledit.sidebar.collapsed';
@@ -429,7 +427,7 @@ function renderBackupDetail(backup) {
   const root = document.querySelector('#backup-detail');
   root.innerHTML = '';
   if (!backup) {
-    root.innerHTML = '<div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>恢复、删除和技术路径集中显示在这里。</p></div>';
+    root.innerHTML = '<div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>备份信息和技术路径将在这里只读显示。</p></div>';
     return;
   }
   const article = document.createElement('article'); article.className = 'backup-detail-card';
@@ -450,20 +448,9 @@ function renderBackupDetail(backup) {
   }
   const path = document.createElement('details'); path.className = 'technical-info';
   path.innerHTML = '<summary>查看技术路径</summary><code></code>'; path.querySelector('code').textContent = backup.path;
-  const actions = document.createElement('div'); actions.className = 'backup-detail-actions';
-  let worldSelect = null;
-  if ((backup.world_ids || []).length > 1) {
-    worldSelect = document.createElement('select'); worldSelect.setAttribute('aria-label', `${backup.name} 恢复世界`);
-    for (const worldId of backup.world_ids) { const option = document.createElement('option'); option.value = worldId; option.textContent = worldId; worldSelect.append(option); }
-    actions.append(worldSelect);
-  }
-  const restore = document.createElement('button'); restore.className = 'backup-restore primary'; restore.innerHTML = '<i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> 检查并恢复';
-  restore.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
-  restore.addEventListener('click', () => beginBackupRestore(backup, worldSelect?.value || backup.world_ids[0], restore));
-  const remove = document.createElement('button'); remove.className = 'backup-delete danger'; remove.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i> 永久删除';
-  remove.disabled = !backup.deletable; remove.title = backup.protected ? '安全快照仍在保护期内' : '永久删除这份本地备份';
-  remove.addEventListener('click', () => beginBackupDelete(backup));
-  actions.append(restore, remove); article.append(path, actions); root.append(article);
+  const readOnly = document.createElement('p'); readOnly.className = 'backup-read-only';
+  readOnly.innerHTML = '<i class="ph ph-eye" aria-hidden="true"></i> 当前界面仅供查看，不提供恢复或删除操作。';
+  article.append(path, readOnly); root.append(article);
 }
 
 async function loadBackups() {
@@ -487,39 +474,6 @@ async function loadBackups() {
     root.querySelector('.empty').textContent = error.message;
     document.querySelector('#backup-summary').textContent = '备份索引暂不可用';
   } finally { button.disabled = false; }
-}
-
-async function beginBackupRestore(backup, worldId, button) {
-  button.disabled = true;
-  setBackupResult(`正在检查 ${backup.name}…`);
-  try {
-    const response = await fetch('/api/backups/restore/prepare', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backup_id:backup.backup_id, world_id:worldId})});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || '备份恢复检查失败');
-    pendingBackupRestore = data;
-    document.querySelector('#restore-world-id').textContent = data.world_id;
-    document.querySelector('#restore-backup-name').textContent = `${data.backup_name} · ${data.source_label}`;
-    document.querySelector('#restore-current-hash').textContent = data.current_sha256;
-    document.querySelector('#restore-backup-hash').textContent = data.backup_sha256;
-    const checkbox = document.querySelector('#backup-restore-confirm'); checkbox.checked = false;
-    document.querySelector('#confirm-backup-restore').disabled = true;
-    showModalWithFocus(document.querySelector('#backup-restore-dialog'), button);
-    setBackupResult('备份检查通过，请在弹窗中完成第二次确认。');
-  } catch (error) {
-    pendingBackupRestore = null;
-    setBackupResult(error.message, 'error');
-  } finally { button.disabled = false; }
-}
-
-function beginBackupDelete(backup) {
-  pendingBackupDelete = backup;
-  document.querySelector('#delete-backup-name').textContent = backup.name;
-  document.querySelector('#delete-backup-source').textContent = backup.source_label;
-  document.querySelector('#delete-backup-world').textContent = backup.world_ids?.join(', ') || '未识别世界';
-  document.querySelector('#delete-backup-size').textContent = formatBytes(backup.size_bytes);
-  const checkbox = document.querySelector('#backup-delete-confirm'); checkbox.checked = false;
-  document.querySelector('#confirm-backup-delete').disabled = true;
-  showModalWithFocus(document.querySelector('#backup-delete-dialog'));
 }
 
 function showResourceTab(name, {fromRoute = false} = {}) {
@@ -2360,20 +2314,9 @@ function renderUser(user) {
   card.querySelector('.user-id').textContent = user.player_uid;
   card.querySelector('.pal-count').textContent = `${user.pal_count} 只帕鲁`;
   card.querySelector('.owner-badge').classList.toggle('hidden', user.player_uid.toLowerCase() !== OWNER_PLAYER_UID);
-  const form = card.querySelector('form');
-  const editableFields = ['nickname','level','experience','unused_status_points','satiety','technology_points'];
-  for (const field of editableFields) form.elements[field].value = user[field] ?? 0;
-  const baseline = Object.fromEntries(editableFields.map(field => [field, String(form.elements[field].value)]));
-  const saveButton = form.querySelector('.save-user');
-  const saveStatus = form.querySelector('.save-result');
-  const changedFields = () => editableFields.filter(field => String(form.elements[field].value) !== baseline[field]);
-  const syncDirty = () => {
-    const count = changedFields().length;
-    saveButton.disabled = count === 0;
-    saveStatus.textContent = count ? `${count} 项待保存` : '尚无变更';
-  };
-  form.addEventListener('input', syncDirty);
-  form.addEventListener('change', syncDirty);
+  const profile = card.querySelector('.user-form');
+  const visibleFields = ['nickname','level','experience','unused_status_points','satiety','technology_points'];
+  for (const field of visibleFields) profile.querySelector(`[name="${field}"]`).value = user[field] ?? 0;
   card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
   renderOwnedPals(card, user);
   renderInventory(card, user);
@@ -2383,22 +2326,6 @@ function renderUser(user) {
     });
     card.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('hidden', pane.dataset.pane !== button.dataset.tab));
   }));
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    const button = form.querySelector('.save-user'); const status = form.querySelector('.save-result');
-    button.disabled = true; status.textContent = '正在备份、写入并重新解析…';
-    const body = {expected_sha256: activeWorldHash, expected_player_sha256:user.player_file_sha256};
-    for (const field of changedFields()) body[field] = form.elements[field].type === 'number' ? Number(form.elements[field].value) : form.elements[field].value;
-    let saved = false;
-    try {
-      const response = await fetch(`/api/world/users/${user.player_uid}?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const data = await response.json(); if (!response.ok) throw new Error(data.detail);
-      activeWorldHash = data.level_sha256; backupData = null; status.textContent = `已保存，备份：${data.backup_path}`;
-      saved = true;
-      await loadUsers();
-    } catch (error) { status.textContent = error.message; }
-    finally { if (!saved) syncDirty(); }
-  });
   return card;
 }
 
@@ -2422,7 +2349,7 @@ function renderInventory(card, user) {
 
   const header = document.createElement('header'); header.className = 'inventory-overview';
   const heading = document.createElement('div'); heading.className = 'inventory-heading';
-  heading.innerHTML = '<span class="inventory-heading-icon"><i class="ph ph-backpack" aria-hidden="true"></i></span><span><strong>角色背包</strong><small>浏览道具，展开卡片后可修改内部 ID 与数量</small></span>';
+  heading.innerHTML = '<span class="inventory-heading-icon"><i class="ph ph-backpack" aria-hidden="true"></i></span><span><strong>角色背包</strong><small>只读浏览道具、内部 ID 与数量</small></span>';
   const stats = document.createElement('div'); stats.className = 'inventory-stats';
   stats.innerHTML = `<span><strong>${occupiedSlots.length.toLocaleString()}</strong><small>已用槽位</small></span><span><strong>${totalItems.toLocaleString()}</strong><small>道具总量</small></span><span><strong>${inventories.length.toLocaleString()}</strong><small>背包分类</small></span>`;
   header.append(heading, stats);
@@ -2509,43 +2436,8 @@ function renderInventorySlot(user, category, slot) {
   const amount = document.createElement('strong'); amount.className = 'inventory-card-count'; amount.textContent = occupied ? `× ${Number(slot.count).toLocaleString()}` : '可用';
   preview.append(iconWrap, copy, amount);
 
-  const editor = document.createElement('details'); editor.className = 'inventory-editor';
-  const editorSummary = document.createElement('summary'); editorSummary.innerHTML = '<span><i class="ph ph-pencil-simple" aria-hidden="true"></i> 编辑槽位</span><i class="ph ph-caret-down" aria-hidden="true"></i>';
-  const fields = document.createElement('div'); fields.className = 'inventory-editor-fields';
-  const itemField = document.createElement('label'); itemField.innerHTML = '<span>道具内部 ID</span>';
-  const item = document.createElement('input'); item.value = slot.item_id; item.spellcheck = false; item.placeholder = '例如 Potion_Extreme';
-  itemField.append(item);
-  const countField = document.createElement('label'); countField.innerHTML = '<span>数量</span>';
-  const count = document.createElement('input'); count.type = 'number'; count.min = '0'; count.max = '999999'; count.value = slot.count;
-  countField.append(count);
-  fields.append(itemField, countField);
-  const actions = document.createElement('div'); actions.className = 'inventory-editor-actions';
-  const status = document.createElement('span'); status.className = 'inventory-save-status'; status.textContent = '尚无变更';
-  const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = '保存此槽位'; save.disabled = true;
-  actions.append(status, save);
-  editor.append(editorSummary, fields, actions);
-  const syncDirty = () => {
-    const changed = item.value !== String(slot.item_id) || Number(count.value) !== Number(slot.count);
-    row.classList.toggle('changed', changed);
-    save.disabled = !changed;
-    status.classList.remove('error');
-    status.textContent = changed ? '有未保存的修改' : '尚无变更';
-  };
-  item.addEventListener('input', syncDirty);
-  count.addEventListener('input', syncDirty);
-  save.addEventListener('click', async () => {
-    save.disabled = true; save.textContent = '正在保存…'; status.classList.remove('error'); status.textContent = '正在备份并写入';
-    try {
-      const body = {category,slot_index:slot.slot_index,item_id:item.value,count:Number(count.value),expected_sha256:activeWorldHash};
-      const response = await fetch(`/api/world/users/${user.player_uid}/inventory?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const data = await response.json(); if (!response.ok) throw new Error(data.detail);
-      activeWorldHash = data.level_sha256; backupData = null; await loadUsers();
-    } catch (error) {
-      status.textContent = error.message; status.classList.add('error');
-      save.disabled = false; save.textContent = '重试保存';
-    }
-  });
-  row.append(preview, editor); return row;
+  const itemId = document.createElement('code'); itemId.className = 'inventory-card-id'; itemId.textContent = slot.item_id;
+  row.append(preview, itemId); return row;
 }
 
 document.querySelector('#refresh').addEventListener('click', scan);
@@ -2770,61 +2662,6 @@ document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEve
 document.querySelector('#reload-backups').addEventListener('click', loadBackups);
 document.querySelector('#backup-query').addEventListener('input', renderBackups);
 document.querySelector('#backup-source').addEventListener('change', renderBackups);
-const backupRestoreDialog = document.querySelector('#backup-restore-dialog');
-const backupRestoreConfirm = document.querySelector('#backup-restore-confirm');
-const backupRestoreButton = document.querySelector('#confirm-backup-restore');
-backupRestoreConfirm.addEventListener('change', () => { backupRestoreButton.disabled = !backupRestoreConfirm.checked; });
-backupRestoreDialog.addEventListener('close', async () => {
-  if (backupRestoreDialog.returnValue !== 'confirm') {
-    pendingBackupRestore = null;
-    setBackupResult('已取消恢复，本地世界未受影响。');
-    return;
-  }
-  const pending = pendingBackupRestore; pendingBackupRestore = null;
-  if (!pending) { setBackupResult('恢复确认已失效，请重新检查备份。', 'error'); return; }
-  setBackupResult('正在备份当前世界并执行原子恢复…');
-  try {
-    const response = await fetch('/api/backups/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({backup_id:pending.backup_id, world_id:pending.world_id, expected_sha256:pending.current_sha256, confirmed:true})});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || '备份恢复失败');
-    backupData = null; activeWorldHash = null; mapData = null;
-    await Promise.all([loadBackups(), scan()]);
-    setBackupResult(`恢复完成 · 当前世界的恢复前快照：${data.safety_backup_path}`, 'ok');
-  } catch (error) {
-    setBackupResult(error.message, 'error');
-  } finally {
-    backupRestoreConfirm.checked = false;
-    backupRestoreButton.disabled = true;
-  }
-});
-const backupDeleteDialog = document.querySelector('#backup-delete-dialog');
-const backupDeleteConfirm = document.querySelector('#backup-delete-confirm');
-const backupDeleteButton = document.querySelector('#confirm-backup-delete');
-backupDeleteConfirm.addEventListener('change', () => { backupDeleteButton.disabled = !backupDeleteConfirm.checked; });
-backupDeleteDialog.addEventListener('close', async () => {
-  if (backupDeleteDialog.returnValue !== 'confirm') {
-    pendingBackupDelete = null;
-    setBackupResult('已取消删除，备份未受影响。');
-    return;
-  }
-  const pending = pendingBackupDelete; pendingBackupDelete = null;
-  if (!pending) { setBackupResult('删除确认已失效，请重新扫描备份。', 'error'); return; }
-  setBackupResult(`正在删除 ${pending.name}…`);
-  try {
-    const response = await fetch(`/api/backups/${encodeURIComponent(pending.backup_id)}`, {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_created_at:pending.created_at, expected_size_bytes:pending.size_bytes, confirmed:true})});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || '备份删除失败');
-    backupData = null;
-    await loadBackups();
-    setBackupResult(`已删除 ${data.backup_name} · 释放 ${formatBytes(data.freed_bytes)}`, 'ok');
-  } catch (error) {
-    setBackupResult(error.message, 'error');
-  } finally {
-    backupDeleteConfirm.checked = false;
-    backupDeleteButton.disabled = true;
-  }
-});
-
 document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });
 document.querySelector('#show-map-players').addEventListener('change', event => document.querySelector('#map-player-layer').classList.toggle('hidden', !event.target.checked));
 document.querySelector('#show-base-camps').addEventListener('change', event => document.querySelector('#base-camp-layer').classList.toggle('hidden', !event.target.checked));
