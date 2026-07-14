@@ -41,8 +41,13 @@ def health() -> dict[str, object]:
 
 
 @app.get("/api/items")
-def items(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
-    return search_items(q, limit)
+def items(
+    q: str = "",
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    category: list[str] = Query(default=[]),
+) -> dict[str, object]:
+    return search_items(q, limit, offset, category)
 
 
 @app.get("/api/items/{item_id}")

@@ -5,6 +5,8 @@ const itemTemplate = document.querySelector('#item-template');
 const itemResults = document.querySelector('#item-results');
 const itemSummary = document.querySelector('#item-summary');
 const itemQuery = document.querySelector('#item-query');
+const itemMore = document.querySelector('#item-more');
+const itemCategories = document.querySelector('#item-categories');
 const palResults = document.querySelector('#pal-results');
 const palSummary = document.querySelector('#pal-summary');
 const palQuery = document.querySelector('#pal-query');
@@ -57,6 +59,12 @@ let pendingBackupDelete = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
+const CATALOG_PAGE_SIZE = 100;
+const catalogStates = {
+  items: {query:'', offset:0, matchCount:0, loading:false, requestId:0, categories:new Set()},
+  pals: {query:'', offset:0, matchCount:0, loading:false, requestId:0},
+  skills: {query:'', offset:0, matchCount:0, loading:false, requestId:0},
+};
 let serverContextRequest = null;
 const ROUTES = {
   overview: {page:'overview', root:'overview'},
@@ -1917,11 +1925,53 @@ function setCatalogImage(row, url, fallbackIcon = 'ph-package') {
   image.addEventListener('error', () => wrap.classList.add('missing'), {once:true});
 }
 
-async function loadItems(query = '') {
-  const response = await fetch(`/api/items?q=${encodeURIComponent(query)}&limit=100`);
+function setCatalogMore(button, state, noun) {
+  const remaining = Math.max(0, state.matchCount - state.offset);
+  button.classList.toggle('hidden', remaining === 0);
+  button.disabled = state.loading;
+  button.textContent = state.loading
+    ? '正在加载…'
+    : `继续加载 ${Math.min(CATALOG_PAGE_SIZE, remaining)} 个${noun}（已显示 ${state.offset.toLocaleString()} / ${state.matchCount.toLocaleString()}）`;
+}
+
+function catalogRequest(state, query, append) {
+  const normalizedQuery = query.trim();
+  const continuing = append && normalizedQuery === state.query;
+  if (continuing && (state.loading || state.offset >= state.matchCount)) return null;
+  state.query = normalizedQuery;
+  if (!continuing) state.offset = 0;
+  state.loading = true;
+  state.requestId += 1;
+  return {append:continuing, offset:state.offset, requestId:state.requestId};
+}
+
+function renderItemCategories(categories) {
+  itemCategories.replaceChildren(...categories.map(category => {
+    const label = document.createElement('label');
+    label.className = 'catalog-type-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = category.name;
+    input.checked = catalogStates.items.categories.has(category.name);
+    const name = document.createElement('span'); name.textContent = category.name;
+    const count = document.createElement('small'); count.textContent = category.count.toLocaleString();
+    label.append(input, name, count);
+    return label;
+  }));
+}
+
+async function loadItems(query = '', append = false) {
+  const state = catalogStates.items;
+  const request = catalogRequest(state, query, append);
+  if (!request) return;
+  setCatalogMore(itemMore, state, '道具');
+  const params = new URLSearchParams({q:state.query, limit:String(CATALOG_PAGE_SIZE), offset:String(request.offset)});
+  for (const category of state.categories) params.append('category', category);
+  const response = await fetch(`/api/items?${params}`);
   const data = await response.json();
-  itemSummary.textContent = `${data.total_items.toLocaleString()} 个内部 ID · ${data.localized_items.toLocaleString()} 个中文名称 · 本地图标与详细说明`;
-  itemResults.innerHTML = '';
+  if (request.requestId !== state.requestId) return;
+  renderItemCategories(data.categories);
+  if (!request.append) itemResults.innerHTML = '';
   for (const item of data.results) {
     const row = itemTemplate.content.firstElementChild.cloneNode(true);
     setCatalogImage(row, item.icon_url);
@@ -1935,11 +1985,24 @@ async function loadItems(query = '') {
     row.addEventListener('click', () => navigator.clipboard.writeText(item.id));
     itemResults.append(row);
   }
+  state.offset += data.results.length;
+  state.matchCount = data.match_count;
+  state.loading = false;
+  const progress = state.query || state.categories.size ? `匹配 ${data.match_count.toLocaleString()} 个 · ` : '';
+  itemSummary.textContent = `${data.total_items.toLocaleString()} 个内部 ID · ${progress}已显示 ${state.offset.toLocaleString()} 个 · ${data.localized_items.toLocaleString()} 个中文名称`;
+  setCatalogMore(itemMore, state, '道具');
   if (!data.results.length) itemResults.innerHTML = '<div class="empty">没有匹配的道具 ID</div>';
 }
 itemQuery.addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => loadItems(itemQuery.value), 180);
+});
+itemMore.addEventListener('click', () => loadItems(itemQuery.value, true));
+itemCategories.addEventListener('change', event => {
+  if (!(event.target instanceof HTMLInputElement)) return;
+  if (event.target.checked) catalogStates.items.categories.add(event.target.value);
+  else catalogStates.items.categories.delete(event.target.value);
+  loadItems(itemQuery.value);
 });
 let palSearchTimer;
 async function loadPals(query = '') {
