@@ -11,16 +11,17 @@
 <body>
   <div class="app-frame">
     <aside id="sidebar" class="sidebar">
-      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="收起菜单栏" title="收起菜单栏"><i class="ph ph-caret-left" aria-hidden="true"></i></button></div>
+      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag" data-target-host>palworld-server</span><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="收起菜单栏" title="收起菜单栏"><i class="ph ph-caret-left" aria-hidden="true"></i></button></div>
       <nav class="main-nav" aria-label="主导航">
         <button data-route="overview" data-nav-root="overview" title="总览"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与关注事项</small></span></button>
         <button data-route="world/search" data-nav-root="world" class="active" title="世界"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>搜索、玩家与备份</small></span></button>
         <button data-route="map" data-nav-root="map" title="地图"><i class="ph ph-map-trifold" aria-hidden="true"></i><span><strong>地图</strong><small>玩家与公会据点</small></span></button>
         <button data-route="manage/players" data-nav-root="manage" title="管理"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>管理</strong><small>在线、规则与维护</small></span></button>
+        <button data-route="settings" data-nav-root="settings" title="基础设置"><i class="ph ph-gear-six" aria-hidden="true"></i><span><strong>设置</strong><small>身份、刷新与连接</small></span></button>
         <button data-route="catalog/items" data-nav-root="catalog" title="图鉴"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>图鉴</strong><small>道具、帕鲁与技能</small></span></button>
       </nav>
       <section class="server-card" aria-label="服务器状态">
-        <div class="server-card-head"><strong>palworld-server</strong><span id="server-state" class="status-pill loading">读取中</span></div>
+        <div class="server-card-head"><strong data-target-host>palworld-server</strong><span id="server-state" class="status-pill loading">读取中</span></div>
         <p>Palworld Dedicated Server</p>
         <dl>
           <div><dt>健康</dt><dd id="server-health">—</dd></div>
@@ -197,6 +198,26 @@
         <nav class="section-nav manage-nav" aria-label="管理工作区"><button data-route="manage/players"><i class="ph ph-users" aria-hidden="true"></i>在线玩家</button><button data-route="manage/chat"><i class="ph ph-chats-circle" aria-hidden="true"></i>服务器聊天</button><button data-route="manage/rules"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i>服务器规则</button><button data-route="manage/operations"><i class="ph ph-power" aria-hidden="true"></i>维护操作</button></nav>
         <section class="panel config-panel"><div class="config-toolbar"><div><h2>游戏与服务器设置</h2><p id="config-source">正在读取远端配置…</p></div><label class="config-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">筛选配置</span><input id="config-query" type="search" placeholder="搜索经验、孵化、备份等作用"></label></div><div id="config-settings" class="config-settings"><div class="empty">正在从 palworld-server 读取…</div></div><div class="config-footer"><p id="config-result" class="config-result" aria-live="polite">修改只会在保存后写入服务器；重启前不会应用。</p><button id="save-config" class="primary" disabled>备份并保存</button></div></section>
         <section class="apply-strip"><div><i class="ph ph-warning-circle" aria-hidden="true"></i><span><strong>应用规则需要重启</strong><small>先保存世界，再重启容器并等待健康检查恢复。</small></span></div><div class="restart-confirmation"><label class="confirm-row"><input id="config-restart-confirm" type="checkbox"><span>我已检查在线玩家并理解连接会暂时中断。</span></label><button id="config-restart" class="danger" disabled>重启服务器</button></div></section>
+      </section>
+
+      <section class="app-view hidden" data-page="settings">
+        <header class="workspace-header"><div><p class="eyebrow">PALEDIT PREFERENCES</p><h1>基础设置</h1><p>标记你的角色，调整后台刷新周期，并管理目标服务器的非敏感连接信息。</p></div><button id="reload-app-settings" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新</button></header>
+        <form id="app-settings-form" class="settings-layout">
+          <section class="panel settings-card">
+            <header><span class="settings-icon"><i class="ph ph-user-circle" aria-hidden="true"></i></span><div><h2>我的角色</h2><p>用于默认选中、地图高亮和“我”的身份徽标。</p></div></header>
+            <label>角色 UID<select id="setting-owner-player-uid" name="owner_player_uid"></select><small>候选角色来自当前本地世界存档；角色 UID 是稳定身份。</small></label>
+          </section>
+          <section class="panel settings-card">
+            <header><span class="settings-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><div><h2>自动刷新</h2><p>保存后当前页面会立即重建定时器。</p></div></header>
+            <div class="settings-grid two"><label>服务器状态刷新（秒）<input id="setting-status-refresh" name="status_refresh_seconds" type="number" min="5" max="300" step="1" required><small>影响状态、在线玩家与实时指标。</small></label><label>聊天刷新（秒）<input id="setting-chat-refresh" name="chat_refresh_seconds" type="number" min="2" max="300" step="1" required><small>页面可见时同步世界频道。</small></label></div>
+          </section>
+          <section class="panel settings-card settings-connection-card">
+            <header><span class="settings-icon"><i class="ph ph-plugs-connected" aria-hidden="true"></i></span><div><h2>目标服务器</h2><p>只保存连接定位信息，不读取或保存密码、私钥和 Cookie。</p></div></header>
+            <div class="settings-grid"><label>连接方式<select id="setting-connection-method" name="connection_method"><option value="ssh">SSH 别名 / 主机名</option></select></label><label>SSH 主机<input id="setting-ssh-host" name="ssh_host" type="text" maxlength="255" required placeholder="palworld-server"></label><label class="span-two">远端存档目录<input id="setting-remote-save-root" name="remote_save_root" type="text" maxlength="512" required></label><label class="span-two">Compose 文件<input id="setting-remote-compose" name="remote_compose_path" type="text" maxlength="512" required></label><label>容器名称<input id="setting-container-name" name="container_name" type="text" maxlength="255" required></label><label>Docker 路径<input id="setting-docker-path" name="docker_path" type="text" maxlength="512" required></label><label>RCON 工具路径<input id="setting-rcon-path" name="rcon_path" type="text" maxlength="512" required></label><label>RCON 端口<input id="setting-rcon-port" name="rcon_port" type="number" min="1" max="65535" required></label></div>
+            <div class="settings-connection-test"><button id="test-app-connection" class="secondary" type="button"><i class="ph ph-pulse" aria-hidden="true"></i> 测试已保存连接</button><span id="settings-test-result" aria-live="polite">测试不会修改服务器。</span></div>
+          </section>
+          <footer class="panel settings-footer"><div><strong>本机设置</strong><p id="settings-storage-path">正在读取保存位置…</p><small id="settings-note">不会保存敏感凭据。</small></div><div><p id="settings-result" class="config-result" aria-live="polite">等待修改</p><button id="save-app-settings" class="primary" type="submit" disabled>保存基础设置</button></div></footer>
+        </form>
       </section>
 
       <section class="app-view hidden" data-page="operations">

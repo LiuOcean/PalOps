@@ -16,6 +16,7 @@ from math import isfinite
 from pathlib import Path
 
 from .save import InvalidSaveError, discover_worlds
+from .settings import load_settings
 
 
 REMOTE_HOST = "palworld-server"
@@ -126,63 +127,67 @@ _SETTING_OPTIONS: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    connection = load_settings()
     remote_command = shlex.join(arguments)
     try:
         return subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", REMOTE_HOST, remote_command],
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", connection.ssh_host, remote_command],
             check=True,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError("连接 palworld-server 超时") from error
+        raise RuntimeError(f"连接 {connection.ssh_host} 超时") from error
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
-        raise RuntimeError(f"palworld-server 操作失败：{detail}") from error
+        raise RuntimeError(f"{connection.ssh_host} 操作失败：{detail}") from error
 
 
 def _remote_hostname() -> str:
     """Resolve the real address behind the SSH alias without opening SSH."""
+    connection = load_settings()
     try:
         result = subprocess.run(
-            ["ssh", "-G", REMOTE_HOST],
+            ["ssh", "-G", connection.ssh_host],
             check=True,
             capture_output=True,
             text=True,
             timeout=5,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError("无法解析 palworld-server 服务器地址") from error
+        raise RuntimeError(f"无法解析 {connection.ssh_host} 服务器地址") from error
     for line in result.stdout.splitlines():
         key, _, value = line.partition(" ")
         if key.lower() == "hostname" and value.strip():
             return value.strip()
-    raise RuntimeError("无法解析 palworld-server 服务器地址")
+    raise RuntimeError(f"无法解析 {connection.ssh_host} 服务器地址")
 
 
 def measure_server_latency() -> float:
     """Measure a direct TCP round trip to the Palworld server process."""
+    connection = load_settings()
     hostname = _remote_hostname()
     started = time.perf_counter()
     try:
-        with socket.create_connection((hostname, RCON_PORT), timeout=3):
+        with socket.create_connection((hostname, connection.rcon_port), timeout=3):
             pass
     except OSError as error:
-        raise RuntimeError("无法测量 palworld-server 服务器延迟") from error
+        raise RuntimeError(f"无法测量 {connection.ssh_host} 服务器延迟") from error
     return round((time.perf_counter() - started) * 1000, 1)
 
 
 def _rcon(command: str, timeout: int = 20) -> str:
+    connection = load_settings()
     result = _ssh(
-        [REMOTE_DOCKER, "exec", SERVER_CONTAINER, RCON_BIN, command],
+        [connection.docker_path, "exec", connection.container_name, connection.rcon_path, command],
         timeout=timeout,
     )
     return result.stdout.strip()
 
 
 def _read_compose() -> str:
-    return _ssh(["cat", REMOTE_COMPOSE]).stdout
+    return _ssh(["cat", load_settings().remote_compose_path]).stdout
 
 
 def _decode_yaml_scalar(raw: str) -> str:
@@ -245,11 +250,12 @@ def _setting_options(key: str) -> list[dict[str, str]] | None:
 
 
 def get_server_config() -> dict[str, object]:
+    connection = load_settings()
     text = _read_compose()
     settings, _, _ = _compose_environment(text)
     return {
-        "host": REMOTE_HOST,
-        "path": REMOTE_COMPOSE,
+        "host": connection.ssh_host,
+        "path": connection.remote_compose_path,
         "revision": hashlib.sha256(text.encode()).hexdigest(),
         "settings": [
             {
@@ -268,6 +274,7 @@ def get_server_config() -> dict[str, object]:
 
 
 def update_server_config(updates: dict[str, object], expected_revision: str) -> dict[str, object]:
+    connection = load_settings()
     text = _read_compose()
     revision = hashlib.sha256(text.encode()).hexdigest()
     if revision != expected_revision:
@@ -307,7 +314,7 @@ def update_server_config(updates: dict[str, object], expected_revision: str) -> 
         "fd,tmp=tempfile.mkstemp(prefix='.compose.',dir=os.path.dirname(p));f=os.fdopen(fd,'wb');"
         "f.write(base64.b64decode(d));f.close();os.chmod(tmp,os.stat(p).st_mode);os.replace(tmp,p);print(backup)"
     )
-    result = _ssh(["python3", "-c", script, REMOTE_COMPOSE, revision, encoded], timeout=30)
+    result = _ssh(["python3", "-c", script, connection.remote_compose_path, revision, encoded], timeout=30)
     return {
         "changed": changed,
         "backup_path": result.stdout.strip(),
@@ -327,13 +334,14 @@ def prepare_server_restart() -> dict[str, object]:
 
 
 def restart_server(confirmation_token: str) -> dict[str, object]:
+    connection = load_settings()
     expiry = _RESTART_TOKENS.pop(confirmation_token, None)
     if expiry is None or expiry <= time.time():
         raise ValueError("重启确认已失效，请重新发起并再次确认")
     save_response = _rcon("Save", timeout=30)
     script = (
-        f"{shlex.quote(REMOTE_DOCKER)} compose -f {shlex.quote(REMOTE_COMPOSE)} restart {SERVER_CONTAINER} >/dev/null && "
-        f"i=0; while [ $i -lt 45 ]; do s=$({shlex.quote(REMOTE_DOCKER)} inspect {SERVER_CONTAINER} "
+        f"{shlex.quote(connection.docker_path)} compose -f {shlex.quote(connection.remote_compose_path)} restart {shlex.quote(connection.container_name)} >/dev/null && "
+        f"i=0; while [ $i -lt 45 ]; do s=$({shlex.quote(connection.docker_path)} inspect {shlex.quote(connection.container_name)} "
         "--format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true); "
         "[ \"$s\" = 'running|healthy' ] && { echo \"$s\"; exit 0; }; i=$((i+1)); sleep 2; done; echo \"$s\"; exit 1"
     )
@@ -342,17 +350,18 @@ def restart_server(confirmation_token: str) -> dict[str, object]:
 
 
 def get_server_status() -> dict[str, object]:
+    connection = load_settings()
     result = _ssh([
-        REMOTE_DOCKER, "inspect", SERVER_CONTAINER,
+        connection.docker_path, "inspect", connection.container_name,
         "--format", "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}",
     ])
     values = result.stdout.strip().split("|", 3)
     if len(values) != 4:
-        raise RuntimeError("无法解析 palworld-server 容器状态")
+        raise RuntimeError(f"无法解析 {connection.ssh_host} 容器状态")
     state, health, started_at, restart_policy = values
     return {
-        "host": REMOTE_HOST,
-        "container": SERVER_CONTAINER,
+        "host": connection.ssh_host,
+        "container": connection.container_name,
         "state": state,
         "health": health or "unknown",
         "started_at": started_at,
@@ -384,8 +393,9 @@ def _finite_float(value: object) -> float | None:
 
 
 def list_online_players() -> list[dict[str, object]]:
+    connection = load_settings()
     result = _ssh([
-        REMOTE_DOCKER, "exec", SERVER_CONTAINER, "sh", "-lc",
+        connection.docker_path, "exec", connection.container_name, "sh", "-lc",
         'curl -fsS --max-time 10 -u "admin:$ADMIN_PASSWORD" http://127.0.0.1:8212/v1/api/players',
     ])
     try:
@@ -403,13 +413,14 @@ def list_online_players() -> list[dict[str, object]]:
             "location_y": _finite_float(player.get("location_y")),
         } for player in raw_players if isinstance(player, dict) and player.get("userId")]
     except (AttributeError, TypeError, ValueError) as error:
-        raise RuntimeError("无法解析 palworld-server 在线玩家列表") from error
+        raise RuntimeError(f"无法解析 {connection.ssh_host} 在线玩家列表") from error
 
 
 def get_server_metrics() -> dict[str, int | float | None]:
     """Read the official Palworld REST metrics without exposing credentials."""
+    connection = load_settings()
     result = _ssh([
-        REMOTE_DOCKER, "exec", SERVER_CONTAINER, "sh", "-lc",
+        connection.docker_path, "exec", connection.container_name, "sh", "-lc",
         'curl -fsS --max-time 10 -u "admin:$ADMIN_PASSWORD" http://127.0.0.1:8212/v1/api/metrics',
     ])
     try:
@@ -479,6 +490,7 @@ def run_server_action(
 
 
 def pull_latest_save(destination: Path) -> dict[str, object]:
+    connection = load_settings()
     destination = destination.expanduser().resolve()
     parent = destination.parent
     parent.mkdir(parents=True, exist_ok=True)
@@ -495,7 +507,7 @@ def pull_latest_save(destination: Path) -> dict[str, object]:
                 "--exclude", "PalEdit-Backup/",
                 "--exclude", "PalEdit-Remote-Backup/",
                 "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10",
-                f"{REMOTE_HOST}:{REMOTE_SAVE_ROOT}/SaveGames/",
+                f"{connection.ssh_host}:{connection.remote_save_root}/SaveGames/",
                 str(staging / "SaveGames") + "/",
             ],
             check=True,
@@ -518,15 +530,15 @@ def pull_latest_save(destination: Path) -> dict[str, object]:
                 backup.rename(destination)
             raise
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError("从 palworld-server 拉取存档超时，已保留当前本地存档") from error
+        raise RuntimeError(f"从 {connection.ssh_host} 拉取存档超时，已保留当前本地存档") from error
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
-        raise RuntimeError(f"从 palworld-server 拉取失败：{detail}") from error
+        raise RuntimeError(f"从 {connection.ssh_host} 拉取失败：{detail}") from error
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
     return {
-        "source": f"{REMOTE_HOST}:{REMOTE_SAVE_ROOT}/SaveGames",
+        "source": f"{connection.ssh_host}:{connection.remote_save_root}/SaveGames",
         "destination": str(destination),
         "world_count": len(worlds),
         "backup_path": str(backup) if replaced else None,

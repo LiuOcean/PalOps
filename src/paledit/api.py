@@ -24,6 +24,7 @@ from .remote import (
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 from .save import InvalidSaveError, discover_worlds
+from .settings import save_settings, settings_payload
 from .skills import search_skills
 from .world import (
     list_guilds, list_storage_containers, list_users, search_world, update_inventory_slot, update_user,
@@ -69,6 +70,39 @@ def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {"status": "ok", "version": __version__, "platform": "macOS"}
+
+
+@app.get("/api/settings")
+def app_settings() -> dict[str, object]:
+    try:
+        return settings_payload()
+    except ValueError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.put("/api/settings")
+def update_app_settings(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        return save_settings(
+            dict(payload.get("updates") or {}), str(payload.get("expected_revision") or ""),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/settings/test")
+def test_app_connection() -> dict[str, object]:
+    try:
+        status = get_server_status()
+        return {
+            "ok": True,
+            "host": status["host"],
+            "container": status["container"],
+            "state": status["state"],
+            "health": status["health"],
+        }
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.get("/api/items")

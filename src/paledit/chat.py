@@ -7,7 +7,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .remote import REMOTE_DOCKER, SERVER_CONTAINER, _ssh
+from .remote import _ssh
+from .settings import load_settings
 
 
 DEFAULT_CHAT_DB = Path.cwd() / ".paledit-data" / "chat.sqlite3"
@@ -73,9 +74,10 @@ def parse_chat_logs(text: str) -> tuple[list[dict[str, str]], str | None]:
 
 
 def _remote_logs(since: str | None) -> str:
-    arguments = [REMOTE_DOCKER, "logs", "--timestamps"]
+    connection = load_settings()
+    arguments = [connection.docker_path, "logs", "--timestamps"]
     arguments.extend(["--since", since or _INITIAL_HISTORY])
-    arguments.append(SERVER_CONTAINER)
+    arguments.append(connection.container_name)
     result = _ssh(arguments, timeout=30)
     return "\n".join(part for part in (result.stdout, result.stderr) if part)
 

@@ -59,11 +59,13 @@ let selectedBackupId = null;
 let pendingBackupRestore = null;
 let pendingBackupDelete = null;
 let restartConfirmationToken = null;
-const SERVER_CONTEXT_REFRESH_MS = 15_000;
-const CHAT_REFRESH_MS = 5_000;
 const CHAT_BACKGROUND_REFRESH_MS = 30_000;
 const SIDEBAR_STORAGE_KEY = 'paledit.sidebar.collapsed';
-const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
+let OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
+let appSettings = null;
+let serverContextTimer = null;
+let chatTimer = null;
+let chatBackgroundTimer = null;
 const CATALOG_PAGE_SIZE = 100;
 const catalogStates = {
   items: {query:'', offset:0, matchCount:0, loading:false, requestId:0, categories:new Set()},
@@ -89,6 +91,7 @@ const ROUTES = {
   'manage/players': {page:'players', root:'manage'},
   'manage/chat': {page:'chat', root:'manage'},
   'manage/rules': {page:'config', root:'manage'},
+  settings: {page:'settings', root:'settings'},
   'manage/operations': {page:'operations', root:'manage'},
   'catalog/items': {page:'data', root:'catalog', catalog:'items'},
   'catalog/pals': {page:'data', root:'catalog', catalog:'pals'},
@@ -154,12 +157,151 @@ function applyRoute(route = currentRoute()) {
   document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open');
   document.querySelector('.app-shell').scrollTo({top:0});
   if (state.page === 'config' && !serverConfig) loadServerConfig();
+  if (state.page === 'settings' && !appSettings) loadAppSettings();
   if (state.page === 'backups' && !backupData) loadBackups();
   if (state.page === 'map') loadWorldMap();
   if (state.page === 'chat') {
     if (chatData) renderChat({forceBottom: true});
     void loadChat();
   }
+}
+
+function normalizedSettingValue(value) {
+  return value == null ? '' : String(value);
+}
+
+function targetHost() {
+  return appSettings?.settings?.ssh_host || 'palworld-server';
+}
+
+function updateTargetHostLabels(host) {
+  document.querySelectorAll('[data-target-host]').forEach(node => { node.textContent = host; });
+  const source = document.querySelector('.freshness span');
+  const worldSource = document.querySelector('.source-status strong');
+  const localNote = document.querySelector('.local-note');
+  const overviewEyebrow = document.querySelector('[data-page="overview"] .workspace-header .eyebrow');
+  const connectionCopy = document.querySelector('.server-context .aside-copy');
+  if (source) source.innerHTML = `<i class="ph ph-circle" aria-hidden="true"></i> 数据来源：${host}`;
+  if (worldSource) worldSource.textContent = `${host} 世界数据`;
+  if (localNote) localNote.innerHTML = `<i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalEdit`;
+  if (overviewEyebrow) overviewEyebrow.textContent = `${host} OBSERVABILITY`;
+  if (connectionCopy) connectionCopy.textContent = `管理凭据保留在 ${host} 容器内。`;
+}
+
+function syncOwnerOptions() {
+  const select = document.querySelector('#setting-owner-player-uid');
+  if (!select) return;
+  const selected = appSettings?.settings?.owner_player_uid || OWNER_PLAYER_UID;
+  const candidates = [...loadedUsers];
+  if (!candidates.some(user => normalizedPlayerId(user.player_uid) === normalizedPlayerId(selected))) {
+    candidates.unshift({player_uid:selected, nickname:'当前设置'});
+  }
+  select.replaceChildren(...candidates.map(user => {
+    const option = document.createElement('option');
+    option.value = user.player_uid;
+    option.textContent = `${user.nickname || '未命名用户'} · ${user.player_uid}`;
+    return option;
+  }));
+  select.value = selected;
+}
+
+function settingsFormValues() {
+  const form = document.querySelector('#app-settings-form');
+  const values = Object.fromEntries(new FormData(form).entries());
+  for (const key of ['status_refresh_seconds', 'chat_refresh_seconds', 'rcon_port']) values[key] = Number(values[key]);
+  return values;
+}
+
+function syncAppSettingsDirty() {
+  const button = document.querySelector('#save-app-settings');
+  if (!button || !appSettings) return;
+  const values = settingsFormValues();
+  const changed = Object.keys(values).some(key => normalizedSettingValue(values[key]) !== normalizedSettingValue(appSettings.settings[key]));
+  button.disabled = !changed;
+  document.querySelector('#settings-result').textContent = changed ? '有尚未保存的修改' : '所有设置已保存';
+}
+
+function scheduleBackgroundRefresh() {
+  if (serverContextTimer) clearInterval(serverContextTimer);
+  if (chatTimer) clearInterval(chatTimer);
+  if (chatBackgroundTimer) clearInterval(chatBackgroundTimer);
+  const statusSeconds = appSettings?.settings?.status_refresh_seconds || 15;
+  const chatSeconds = appSettings?.settings?.chat_refresh_seconds || 5;
+  serverContextTimer = window.setInterval(refreshServerContextInBackground, statusSeconds * 1000);
+  chatTimer = window.setInterval(refreshChatInBackground, chatSeconds * 1000);
+  chatBackgroundTimer = window.setInterval(persistChatInBackground, CHAT_BACKGROUND_REFRESH_MS);
+  const overviewNote = document.querySelector('[data-page="overview"] .auto-refresh-note');
+  const operationsNote = document.querySelector('[data-page="operations"] .auto-refresh-note');
+  if (overviewNote) overviewNote.innerHTML = `<i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 实时 ${statusSeconds} 秒 · 历史 60 秒`;
+  if (operationsNote) operationsNote.innerHTML = `<i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 每 ${statusSeconds} 秒刷新`;
+  const chatFooter = document.querySelector('.chat-footer span:last-child');
+  if (chatFooter) chatFooter.innerHTML = `<i class="ph ph-arrows-clockwise" aria-hidden="true"></i> ${chatSeconds} 秒自动同步`;
+}
+
+function applyAppSettings(payload) {
+  appSettings = payload;
+  OWNER_PLAYER_UID = String(payload.settings.owner_player_uid).toLowerCase();
+  updateTargetHostLabels(payload.settings.ssh_host);
+  scheduleBackgroundRefresh();
+}
+
+function renderAppSettings() {
+  if (!appSettings) return;
+  const settings = appSettings.settings;
+  syncOwnerOptions();
+  const fields = {
+    '#setting-status-refresh':'status_refresh_seconds', '#setting-chat-refresh':'chat_refresh_seconds',
+    '#setting-connection-method':'connection_method', '#setting-ssh-host':'ssh_host',
+    '#setting-remote-save-root':'remote_save_root', '#setting-remote-compose':'remote_compose_path',
+    '#setting-container-name':'container_name', '#setting-docker-path':'docker_path',
+    '#setting-rcon-path':'rcon_path', '#setting-rcon-port':'rcon_port',
+  };
+  for (const [selector, key] of Object.entries(fields)) document.querySelector(selector).value = settings[key];
+  document.querySelector('#settings-storage-path').textContent = appSettings.storage_path;
+  document.querySelector('#settings-note').textContent = appSettings.note;
+  document.querySelector('#save-app-settings').disabled = true;
+  document.querySelector('#settings-result').textContent = '所有设置已保存';
+}
+
+async function loadAppSettings({render = true} = {}) {
+  const response = await fetch('/api/settings');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || '读取基础设置失败');
+  applyAppSettings(data);
+  if (render) renderAppSettings();
+  return data;
+}
+
+async function saveAppSettings(event) {
+  event.preventDefault();
+  const button = document.querySelector('#save-app-settings');
+  const result = document.querySelector('#settings-result');
+  button.disabled = true; result.textContent = '正在保存本机设置…'; result.className = 'config-result';
+  try {
+    const response = await fetch('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({updates:settingsFormValues(), expected_revision:appSettings.revision})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '保存基础设置失败');
+    applyAppSettings(data); renderAppSettings();
+    result.textContent = '基础设置已保存并立即生效'; result.className = 'config-result ok';
+    serverConfig = null; mapData = null;
+    await loadServerContext({showLoading:false});
+  } catch (error) {
+    result.textContent = error.message; result.className = 'config-result error';
+    button.disabled = false;
+  }
+}
+
+async function testAppConnection() {
+  const button = document.querySelector('#test-app-connection');
+  const result = document.querySelector('#settings-test-result');
+  button.disabled = true; result.textContent = '正在通过已保存设置连接…'; result.className = '';
+  try {
+    const response = await fetch('/api/settings/test', {method:'POST'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '连接测试失败');
+    result.textContent = `${data.host} · ${data.container} · ${data.state} / ${data.health}`; result.className = 'ok';
+  } catch (error) { result.textContent = error.message; result.className = 'error'; }
+  finally { button.disabled = false; }
 }
 
 function showView(name) {
@@ -451,7 +593,7 @@ function renderServerConfig() {
 
 async function loadServerConfig() {
   const root = document.querySelector('#config-settings');
-  root.innerHTML = '<div class="empty">正在从 palworld-server 读取持久化配置…</div>';
+  root.innerHTML = `<div class="empty">正在从 ${targetHost()} 读取持久化配置…</div>`;
   document.querySelector('#save-config').disabled = true;
   document.querySelector('#export-config').disabled = true;
   try {
@@ -1085,6 +1227,7 @@ function hydrateWorldSnapshot(data) {
   loadedUsers = data.users || [];
   loadedGuilds = data.guilds || [];
   loadedSearchResults = [];
+  syncOwnerOptions();
   selectedSearchKey = null;
   containerPanel.classList.remove('hidden'); guildPanel.classList.remove('hidden');
   containerSummary.textContent = `${loadedContainers.length} 个物品容器 · ${loadedContainers.filter(row => row.label).length} 个带标签 · 只读展示`;
@@ -1980,7 +2123,7 @@ async function loadWorldMap() {
   const result = document.querySelector('#map-result');
   empty.classList.remove('hidden');
   empty.querySelector('strong').textContent = '正在读取服务器玩家位置';
-  empty.querySelector('p').textContent = '直接请求 palworld-server Palworld REST 在线玩家接口。';
+  empty.querySelector('p').textContent = `直接请求 ${targetHost()} Palworld REST 在线玩家接口。`;
   result.textContent = '';
   mapRequest = (async () => {
     try {
@@ -2054,6 +2197,7 @@ async function loadUsers() {
   if (!response.ok) { usersNode.innerHTML = `<div class="empty">${data.detail}</div>`; return; }
   activeWorldHash = data.level_sha256;
   loadedUsers = data.users;
+  syncOwnerOptions();
   renderUserNavigation();
   if (document.querySelector('[data-resource-tab="users"]').classList.contains('active')) selectUser(selectedUserId);
 }
@@ -2368,7 +2512,7 @@ document.querySelector('#pull-save').addEventListener('click', async event => {
   const button = event.currentTarget;
   const result = document.querySelector('#pull-result');
   button.disabled = true;
-  button.textContent = '正在从 palworld-server 拉取…';
+  button.textContent = `正在从 ${targetHost()} 拉取…`;
   result.className = 'sync-result';
   result.textContent = '正在下载并校验最新存档，当前本地数据会先保留。';
   try {
@@ -2722,6 +2866,11 @@ document.querySelector('#reload-config').addEventListener('click', loadServerCon
 document.querySelector('#config-query').addEventListener('input', () => { if (serverConfig) renderServerConfig(); });
 document.querySelector('#save-config').addEventListener('click', saveServerConfig);
 document.querySelector('#export-config').addEventListener('click', exportServerConfig);
+document.querySelector('#reload-app-settings').addEventListener('click', () => loadAppSettings());
+document.querySelector('#app-settings-form').addEventListener('input', syncAppSettingsDirty);
+document.querySelector('#app-settings-form').addEventListener('change', syncAppSettingsDirty);
+document.querySelector('#app-settings-form').addEventListener('submit', saveAppSettings);
+document.querySelector('#test-app-connection').addEventListener('click', testAppConnection);
 
 const configRestartConfirm = document.querySelector('#config-restart-confirm');
 const configRestartButton = document.querySelector('#config-restart');
@@ -2831,18 +2980,21 @@ document.querySelectorAll('[data-history-hours]').forEach(button => button.addEv
 }));
 window.addEventListener('resize', () => { if (serverHistory && currentRoute() === 'overview') renderServerHistory(); });
 document.querySelector('#mobile-world-back').addEventListener('click', () => document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open'));
-initSidebar();
-if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
-scan();
-loadItems();
-loadPals();
-loadSkills();
-loadBackups();
-loadServerContext();
-void loadServerHistory();
-void loadChat({showLoading: false});
-window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
-window.setInterval(refreshChatInBackground, CHAT_REFRESH_MS);
-window.setInterval(persistChatInBackground, CHAT_BACKGROUND_REFRESH_MS);
+async function bootstrap() {
+  initSidebar();
+  try { await loadAppSettings({render:true}); }
+  catch (error) { document.querySelector('#settings-result').textContent = error.message; document.querySelector('#settings-result').className = 'config-result error'; scheduleBackgroundRefresh(); }
+  if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
+  scan();
+  loadItems();
+  loadPals();
+  loadSkills();
+  loadBackups();
+  loadServerContext();
+  void loadServerHistory();
+  void loadChat({showLoading: false});
+}
+
+void bootstrap();
 document.addEventListener('visibilitychange', refreshServerContextInBackground);
 document.addEventListener('visibilitychange', refreshChatInBackground);

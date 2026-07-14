@@ -1,0 +1,65 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from paledit.settings import AppSettings, load_settings, save_settings, settings_payload
+
+
+def test_settings_use_safe_paledit_defaults_when_file_is_missing(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+
+    result = settings_payload(path)
+
+    assert result["settings"] == AppSettings().dump()
+    assert result["settings"]["owner_player_uid"] == "00000000-0000-0000-0000-000000000000"
+    assert result["settings"]["ssh_host"] == "palworld-server"
+    assert not path.exists()
+
+
+def test_settings_are_validated_and_written_atomically(tmp_path: Path) -> None:
+    path = tmp_path / ".paledit-data" / "settings.json"
+    initial = settings_payload(path)
+
+    result = save_settings(
+        {
+            "status_refresh_seconds": 30,
+            "chat_refresh_seconds": 10,
+            "ssh_host": "pal-server",
+        },
+        str(initial["revision"]),
+        path,
+    )
+
+    assert load_settings(path).status_refresh_seconds == 30
+    assert result["settings"]["ssh_host"] == "pal-server"
+    assert json.loads(path.read_text())["chat_refresh_seconds"] == 10
+    assert list(path.parent.glob(".settings.*.json")) == []
+
+
+def test_settings_reject_stale_revision_without_writing(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+
+    with pytest.raises(ValueError, match="已被其他操作修改"):
+        save_settings({"status_refresh_seconds": 30}, "stale", path)
+
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"owner_player_uid": "not-a-uuid"}, "角色 UID"),
+        ({"status_refresh_seconds": 1}, "5–300"),
+        ({"ssh_host": "bad host"}, "SSH 主机"),
+        ({"remote_save_root": "relative/path"}, "绝对路径"),
+        ({"rcon_port": 70000}, "1–65535"),
+        ({"connection_method": "http"}, "仅支持 SSH"),
+    ],
+)
+def test_settings_reject_invalid_values(tmp_path: Path, updates: dict[str, object], message: str) -> None:
+    path = tmp_path / "settings.json"
+    revision = str(settings_payload(path)["revision"])
+
+    with pytest.raises(ValueError, match=message):
+        save_settings(updates, revision, path)
