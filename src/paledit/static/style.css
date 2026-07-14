@@ -123,4 +123,21 @@ dialog:focus-visible{outline:2px solid var(--lime);outline-offset:4px}
 .app-view[data-page="data"] [data-catalog-pane="items"] .item-results{max-height:calc(100dvh - 340px)}
 @media(max-width:700px){.app-view[data-page="data"] [data-catalog-pane="items"] .item-results{max-height:none}}
 
+.sidebar-toggle{position:absolute;z-index:2;top:21px;right:10px;width:30px;height:30px;font-size:14px;box-shadow:0 4px 14px #0006}.brand{padding-right:45px}
+
+@media(min-width:640px){
+  .app-frame{transition:grid-template-columns .2s ease}
+  .sidebar,.brand strong,.host-tag,.main-nav button span,.server-card,.local-note{transition:opacity .15s ease}
+  .app-frame.sidebar-collapsed{grid-template-columns:72px minmax(0,1fr)}
+  .app-frame.sidebar-collapsed .sidebar{padding-right:10px;padding-left:10px}
+  .app-frame.sidebar-collapsed .brand{min-height:30px;padding:0 0 16px}
+  .app-frame.sidebar-collapsed .sidebar-toggle{right:20px}
+  .app-frame.sidebar-collapsed .logo,.app-frame.sidebar-collapsed .brand strong,.app-frame.sidebar-collapsed .host-tag,.app-frame.sidebar-collapsed .main-nav button span,.app-frame.sidebar-collapsed .server-card,.app-frame.sidebar-collapsed .local-note{display:none}
+  .app-frame.sidebar-collapsed .main-nav button{grid-template-columns:1fr;justify-items:center;gap:0;padding:10px 0;text-align:center}
+  .app-frame.sidebar-collapsed .main-nav button>i{font-size:22px}
+}
+
+@media(min-width:640px) and (max-width:920px){.sidebar-toggle{top:17px}.host-tag{display:none}}
+@media(max-width:639px){.sidebar-toggle{display:none}}
+
 .mini-chart-frame{position:relative}.chart-frame canvas,.mini-chart-frame canvas{cursor:crosshair}.chart-tooltip{position:absolute;z-index:5;min-width:128px;display:grid;gap:4px;padding:8px 10px;transform:translate(-50%,calc(-100% - 10px));border:1px solid var(--line-strong);border-radius:7px;background:#08100ded;box-shadow:0 8px 24px #000b;opacity:0;pointer-events:none;transition:opacity .1s ease}.chart-tooltip.visible{opacity:1}.chart-tooltip small{color:#829087;font-size:8px;white-space:nowrap}.chart-tooltip strong{color:#eef3ef;font-size:10px;white-space:nowrap}

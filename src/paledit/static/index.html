@@ -10,14 +10,14 @@
 </head>
 <body>
   <div class="app-frame">
-    <aside class="sidebar">
-      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag">palworld-server</span><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="收起菜单栏" title="收起菜单栏"><i class="ph ph-caret-left" aria-hidden="true"></i></button></div>
       <nav class="main-nav" aria-label="主导航">
-        <button data-route="overview" data-nav-root="overview"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与关注事项</small></span></button>
-        <button data-route="world/search" data-nav-root="world" class="active"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>搜索、玩家与备份</small></span></button>
-        <button data-route="map" data-nav-root="map"><i class="ph ph-map-trifold" aria-hidden="true"></i><span><strong>地图</strong><small>玩家与公会据点</small></span></button>
-        <button data-route="manage/players" data-nav-root="manage"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>管理</strong><small>在线、规则与维护</small></span></button>
-        <button data-route="catalog/items" data-nav-root="catalog"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>图鉴</strong><small>道具、帕鲁与技能</small></span></button>
+        <button data-route="overview" data-nav-root="overview" title="总览"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与关注事项</small></span></button>
+        <button data-route="world/search" data-nav-root="world" class="active" title="世界"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>搜索、玩家与备份</small></span></button>
+        <button data-route="map" data-nav-root="map" title="地图"><i class="ph ph-map-trifold" aria-hidden="true"></i><span><strong>地图</strong><small>玩家与公会据点</small></span></button>
+        <button data-route="manage/players" data-nav-root="manage" title="管理"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span><strong>管理</strong><small>在线、规则与维护</small></span></button>
+        <button data-route="catalog/items" data-nav-root="catalog" title="图鉴"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>图鉴</strong><small>道具、帕鲁与技能</small></span></button>
       </nav>
       <section class="server-card" aria-label="服务器状态">
         <div class="server-card-head"><strong>palworld-server</strong><span id="server-state" class="status-pill loading">读取中</span></div>

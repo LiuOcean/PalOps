@@ -62,6 +62,7 @@ let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
 const CHAT_REFRESH_MS = 5_000;
 const CHAT_BACKGROUND_REFRESH_MS = 30_000;
+const SIDEBAR_STORAGE_KEY = 'paledit.sidebar.collapsed';
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 const CATALOG_PAGE_SIZE = 100;
 const catalogStates = {
@@ -104,6 +105,28 @@ function playersFromResponse(payload) {
 function currentRoute() {
   const route = location.hash.replace(/^#\/?/, '');
   return ROUTES[route] ? route : 'world/containers';
+}
+
+function setSidebarCollapsed(collapsed, {persist = true} = {}) {
+  const frame = document.querySelector('.app-frame');
+  const toggle = document.querySelector('#sidebar-toggle');
+  frame.classList.toggle('sidebar-collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.setAttribute('aria-label', collapsed ? '展开菜单栏' : '收起菜单栏');
+  toggle.title = collapsed ? '展开菜单栏' : '收起菜单栏';
+  toggle.querySelector('i').className = `ph ${collapsed ? 'ph-caret-right' : 'ph-caret-left'}`;
+  if (persist) {
+    try { localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? 'true' : 'false'); } catch (_) { /* storage may be unavailable */ }
+  }
+}
+
+function initSidebar() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'; } catch (_) { /* use expanded default */ }
+  setSidebarCollapsed(collapsed, {persist:false});
+  document.querySelector('#sidebar-toggle').addEventListener('click', () => {
+    setSidebarCollapsed(!document.querySelector('.app-frame').classList.contains('sidebar-collapsed'));
+  });
 }
 
 function navigate(route) {
@@ -2752,6 +2775,7 @@ document.querySelectorAll('[data-history-hours]').forEach(button => button.addEv
 }));
 window.addEventListener('resize', () => { if (serverHistory && currentRoute() === 'overview') renderServerHistory(); });
 document.querySelector('#mobile-world-back').addEventListener('click', () => document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open'));
+initSidebar();
 if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
 scan();
 loadItems();
