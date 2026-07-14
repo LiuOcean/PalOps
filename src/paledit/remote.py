@@ -8,7 +8,6 @@ import base64
 import hashlib
 import re
 import secrets
-import socket
 import time
 from datetime import datetime
 from itertools import combinations
@@ -24,7 +23,6 @@ REMOTE_SAVE_ROOT = "/srv/palworld/Pal/Saved"
 REMOTE_DOCKER = "/usr/local/bin/docker"
 SERVER_CONTAINER = "palworld-server"
 RCON_BIN = "/usr/bin/rcon-cli"
-RCON_PORT = 25575
 REMOTE_COMPOSE = "/srv/palworld/compose.yaml"
 _RESTART_TOKENS: dict[str, float] = {}
 _RESTART_TOKEN_TTL = 120
@@ -156,39 +154,26 @@ def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess
         raise RuntimeError(f"{label} 操作失败：{error}") from error
 
 
-def _remote_hostname() -> str:
-    """Resolve the real address behind the SSH alias without opening SSH."""
+def measure_server_latency() -> float:
+    """Measure the round trip to the configured public player-facing host."""
     connection = load_settings()
-    if connection.connection_method == "direct":
-        return "host.docker.internal"
+    hostname = connection.public_access_host
+    if not hostname:
+        raise RuntimeError("请先在基础设置中填写公网访问地址")
     try:
         result = subprocess.run(
-            ["ssh", "-G", connection.ssh_host],
-            check=True,
+            ["ping", "-n", "-c", "1", hostname],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"无法解析 {connection.ssh_host} 服务器地址") from error
-    for line in result.stdout.splitlines():
-        key, _, value = line.partition(" ")
-        if key.lower() == "hostname" and value.strip():
-            return value.strip()
-    raise RuntimeError(f"无法解析 {connection.ssh_host} 服务器地址")
-
-
-def measure_server_latency() -> float:
-    """Measure a direct TCP round trip to the Palworld server process."""
-    connection = load_settings()
-    hostname = _remote_hostname()
-    started = time.perf_counter()
-    try:
-        with socket.create_connection((hostname, connection.rcon_port), timeout=3):
-            pass
-    except OSError as error:
-        raise RuntimeError(f"无法测量 {_connection_label()} 服务器延迟") from error
-    return round((time.perf_counter() - started) * 1000, 1)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"无法通过公网地址 {hostname} 测量服务器延迟") from error
+    match = re.search(r"time[=<]\s*([0-9.]+)\s*ms", f"{result.stdout}\n{result.stderr}", re.IGNORECASE)
+    if result.returncode != 0 or not match:
+        raise RuntimeError(f"无法通过公网地址 {hostname} 测量服务器延迟")
+    return round(float(match.group(1)), 1)
 
 
 def _rcon(command: str, timeout: int = 20) -> str:

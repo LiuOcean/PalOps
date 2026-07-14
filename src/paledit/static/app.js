@@ -291,6 +291,7 @@ function renderAppSettings() {
   const fields = {
     '#setting-status-refresh':'status_refresh_seconds', '#setting-chat-refresh':'chat_refresh_seconds',
     '#setting-connection-method':'connection_method', '#setting-ssh-host':'ssh_host',
+    '#setting-public-access-host':'public_access_host',
     '#setting-remote-save-root':'remote_save_root', '#setting-remote-compose':'remote_compose_path',
     '#setting-container-name':'container_name', '#setting-docker-path':'docker_path',
     '#setting-rcon-path':'rcon_path', '#setting-rcon-port':'rcon_port',
@@ -898,7 +899,7 @@ function renderServerHistory() {
     rangeEnd,
     rangeHours,
   };
-  renderHistoryChart('#latency-chart', samples, 'server_latency_ms', {...chartRange, color:'#6ccfff', fill:'#6ccfff14', label:'服务器延迟', unit:' ms', digits:1});
+  renderHistoryChart('#latency-chart', samples, 'server_latency_ms', {...chartRange, color:'#6ccfff', fill:'#6ccfff14', label:'公网延迟', unit:' ms', digits:1});
   renderHistoryChart('#fps-chart', samples, 'server_fps', {...chartRange, color:'#a8ff55', fill:'#a8ff5512', label:'服务器 FPS', digits:1});
   renderHistoryChart('#health-chart', samples, 'health_score', {...chartRange, color:'#e8b75b', fill:'#e8b75b12', fixedMax:100, label:'健康分', digits:0});
   renderHistoryChart('#players-chart', samples, 'current_players', {...chartRange, color:'#ba8cff', fill:'#ba8cff12', label:'在线玩家', unit:' 人', digits:0});

@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl docker-cli git rsync \
+    && apt-get install -y --no-install-recommends ca-certificates curl docker-cli git iputils-ping rsync \
     && case "$TARGETARCH" in arm64) compose_arch=aarch64 ;; amd64) compose_arch=x86_64 ;; *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; esac \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL "https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${compose_arch}" -o /usr/local/lib/docker/cli-plugins/docker-compose \

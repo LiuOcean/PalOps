@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from uuid import UUID
 
 DEFAULT_SETTINGS_PATH = Path.cwd() / ".paledit-data" / "settings.json"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$")
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class AppSettings:
     chat_refresh_seconds: int = 5
     connection_method: str = "ssh"
     ssh_host: str = "palworld-server"
+    public_access_host: str = ""
     remote_save_root: str = "/srv/palworld/Pal/Saved"
     remote_compose_path: str = "/srv/palworld/compose.yaml"
     docker_path: str = "/usr/local/bin/docker"
@@ -35,6 +38,15 @@ class AppSettings:
 def _revision(settings: AppSettings) -> str:
     encoded = json.dumps(settings.dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _valid_public_host(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        labels = value.split(".")
+        return len(value) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in labels)
 
 
 def _validated(payload: dict[str, object]) -> AppSettings:
@@ -66,9 +78,12 @@ def _validated(payload: dict[str, object]) -> AppSettings:
         return value
 
     ssh_host = str(merged["ssh_host"]).strip()
+    public_access_host = str(merged["public_access_host"]).strip()
     container_name = str(merged["container_name"]).strip()
     if not _SAFE_NAME.fullmatch(ssh_host):
         raise ValueError("SSH 主机必须是安全的主机名或 SSH 别名")
+    if public_access_host and not _valid_public_host(public_access_host):
+        raise ValueError("公网访问地址必须是有效的域名或 IP，且不包含协议和端口")
     if not _SAFE_NAME.fullmatch(container_name):
         raise ValueError("容器名称格式无效")
     connection_method = str(merged["connection_method"]).strip()
@@ -88,6 +103,7 @@ def _validated(payload: dict[str, object]) -> AppSettings:
         chat_refresh_seconds=interval("chat_refresh_seconds", "聊天刷新周期", 2, 300),
         connection_method=connection_method,
         ssh_host=ssh_host,
+        public_access_host=public_access_host,
         remote_save_root=absolute_path("remote_save_root", "远端存档目录"),
         remote_compose_path=absolute_path("remote_compose_path", "Compose 路径"),
         docker_path=absolute_path("docker_path", "Docker 路径"),
