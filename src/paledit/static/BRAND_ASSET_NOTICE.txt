@@ -1,0 +1,15 @@
+PalOps brand asset notice
+=========================
+
+The application icon is the official Palworld client icon distributed through
+Steam for App ID 1623730.
+
+Source:
+  https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/1623730/22a20bdaa6d782f60caa45eb7b02fc2411dcd988.ico
+Steam asset hash:
+  22a20bdaa6d782f60caa45eb7b02fc2411dcd988
+
+Palworld, its logo, characters, artwork, and game assets are the property of
+Pocketpair, Inc. and their respective rights holders. PalOps is an independent,
+unofficial administration tool and is not endorsed by or affiliated with
+Pocketpair or Valve.

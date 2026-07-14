@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import os
 import shutil
-import struct
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,52 +35,6 @@ def _open(level_path: Path):
     install_palworld_1_0_property_support()
     raw, save_type = decompress_sav_to_gvas(level_path.read_bytes())
     return GvasFile.read(raw, palworld_1_0_type_hints(), _custom_properties()), save_type
-
-
-def _encoded_guid(value: str) -> bytes:
-    from palworld_save_tools.archive import FArchiveWriter
-
-    writer = FArchiveWriter()
-    writer.guid(value)
-    return writer.bytes()
-
-
-def _label_from_unknown(data: bytes) -> tuple[bytes, str, bytes]:
-    if len(data) < 18:
-        raise ValueError("箱子标签字段过短")
-    for offset in range(len(data) - 3):
-        length = struct.unpack_from("<i", data, offset)[0]
-        end = offset + 4 + (-length * 2) if length < 0 else -1
-        if -64 <= length <= -2 and end <= len(data) and data[end - 2:end] == b"\x00\x00":
-            value = data[offset + 4:end - 2].decode("utf-16le")
-            if value == "物资箱" or value.startswith("物资箱-"):
-                return data[:offset], value, data[end:]
-    raise ValueError("无法定位箱子标签 FString")
-
-
-def _set_label(map_object: dict[str, Any], label: str) -> None:
-    from palworld_save_tools.archive import FArchiveWriter
-
-    model = map_object["Model"]["value"]["RawData"]["value"]
-    unknown = bytes(model.get("unknown_data", []))
-    prefix, current, suffix = _label_from_unknown(unknown)
-    if current != "物资箱" and not current.startswith("物资箱-"):
-        raise ValueError(f"拒绝修改非目标标签：{current}")
-    writer = FArchiveWriter()
-    writer.fstring(label)
-    model["unknown_data"] = list(prefix + writer.bytes() + suffix)
-
-
-def _container_id(map_object: dict[str, Any], planned: set[str]) -> str | None:
-    modules = map_object["ConcreteModel"]["value"]["ModuleMap"]["value"]
-    for module in modules:
-        if module["key"] != "EPalMapObjectConcreteModelModuleType::ItemContainer":
-            continue
-        raw = bytes(module["value"]["RawData"]["value"]["values"])
-        for container_id in planned:
-            if raw.startswith(_encoded_guid(container_id)):
-                return container_id
-    return None
 
 
 def _slot_template(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -211,19 +164,6 @@ def apply_box_plan(
     template = _slot_template(rows)
     for plan in plans:
         _fill_container(by_id[plan.container_id], plan, template)
-
-    found: set[str] = set()
-    for map_object in world["MapObjectSaveData"]["value"]["values"]:
-        if map_object["MapObjectId"]["value"] != "ItemChest_04":
-            continue
-        container_id = _container_id(map_object, planned)
-        if container_id is None:
-            continue
-        plan = next(item for item in plans if item.container_id == container_id)
-        _set_label(map_object, plan.label)
-        found.add(container_id)
-    if found != planned:
-        raise ValueError(f"未完整定位目标箱子标签：{len(found)}/{len(planned)}")
 
     raw = copy.deepcopy(gvas).write(_custom_properties())
     output = compress_gvas_to_sav(raw, 0x32, True)

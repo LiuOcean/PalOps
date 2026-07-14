@@ -7,13 +7,9 @@ from paledit.world import (
 
 ROOT = Path(__file__).parents[1]
 WORLD = next(path.parent for path in (ROOT / "Save" / "SaveGames" / "0").glob("*/Level.sav"))
-OWNER_PLAYER_UID = "00000000-0000-0000-0000-000000000000"
-
-
 def test_current_world_lists_real_users_and_owned_pals() -> None:
     result = list_users(WORLD)
     assert result["users"]
-    assert any(user["player_uid"] == OWNER_PLAYER_UID for user in result["users"])
     assert all("nickname" in user and "pals" in user for user in result["users"])
     assert sum(user["pal_count"] for user in result["users"]) > 0
 

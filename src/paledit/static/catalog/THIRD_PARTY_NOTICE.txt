@@ -1,4 +1,4 @@
-PalEdit catalog enrichment
+PalOps catalog enrichment
 ==========================
 
 Item metadata, Pal names, passive-skill descriptions, item icons, and Pal icons

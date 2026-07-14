@@ -1,12 +1,13 @@
 from palworld_save_tools.archive import FArchiveWriter, instance_id_writer, uuid_writer
+from uuid import UUID
 
 from paledit.world import decode_base_camp_raw, decode_guild_raw
 
 
-GUILD_ID = "00000000-0000-0000-0000-000000000302"
-ADMIN_UID = "00000000-0000-0000-0000-000000000303"
-MEMBER_UID = "00000000-0000-0000-0000-000000000000"
-BASE_ID = "00000000-0000-0000-0000-000000000301"
+GUILD_ID = str(UUID(int=1))
+ADMIN_UID = str(UUID(int=2))
+MEMBER_UID = str(UUID(int=3))
+BASE_ID = str(UUID(int=4))
 
 
 def guild_payload(name: str = "测试公会") -> bytes:
@@ -52,7 +53,7 @@ def base_camp_payload() -> bytes:
     writer.float(3500.0)
     writer.guid(GUILD_ID)
     writer.ftransform(transform)
-    writer.guid("11111111-2222-3333-4444-555555555555")
+    writer.guid(str(UUID(int=5)))
     writer.write(b"\x00\x00\x00\x00")
     return writer.bytes()
 

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PalEdit</title>
+  <title>PalOps</title>
+  <link rel="icon" href="/assets/palworld-official-icon.ico" sizes="any">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/map.css">
   <link rel="stylesheet" href="/assets/icons/phosphor.css">
@@ -11,7 +12,7 @@
 <body>
   <div class="app-frame">
     <aside id="sidebar" class="sidebar">
-      <div class="brand"><span class="logo">P</span><strong>PalEdit</strong><span class="host-tag" data-target-host>palworld-server</span><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="收起菜单栏" title="收起菜单栏"><i class="ph ph-caret-left" aria-hidden="true"></i></button></div>
+      <div class="brand"><span class="logo"><img src="/assets/palworld-official-icon.ico" alt=""></span><strong>PalOps</strong><span class="host-tag" data-target-host>目标服务器</span><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="收起菜单栏" title="收起菜单栏"><i class="ph ph-caret-left" aria-hidden="true"></i></button></div>
       <nav class="main-nav" aria-label="主导航">
         <button data-route="overview" data-nav-root="overview" title="总览"><i class="ph ph-house" aria-hidden="true"></i><span><strong>总览</strong><small>状态与关注事项</small></span></button>
         <button data-route="world/search" data-nav-root="world" class="active" title="世界"><i class="ph ph-database" aria-hidden="true"></i><span><strong>世界</strong><small>搜索、玩家与备份</small></span></button>
@@ -21,7 +22,7 @@
         <button data-route="catalog/items" data-nav-root="catalog" title="图鉴"><i class="ph ph-book-open-text" aria-hidden="true"></i><span><strong>图鉴</strong><small>道具、帕鲁与技能</small></span></button>
       </nav>
       <section class="server-card" aria-label="服务器状态">
-        <div class="server-card-head"><strong data-target-host>palworld-server</strong><span id="server-state" class="status-pill loading">读取中</span></div>
+        <div class="server-card-head"><strong data-target-host>目标服务器</strong><span id="server-state" class="status-pill loading">读取中</span></div>
         <p>Palworld Dedicated Server</p>
         <dl>
           <div><dt>健康</dt><dd id="server-health">—</dd></div>
@@ -30,14 +31,14 @@
         </dl>
         <button data-jump="operations" class="sidebar-action"><i class="ph ph-power" aria-hidden="true"></i> 安全维护</button>
       </section>
-      <p class="local-note"><i class="ph ph-lock-key" aria-hidden="true"></i> 本地连接 · 凭据不离开 palworld-server</p>
+      <p class="local-note"><i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalOps</p>
     </aside>
 
     <main class="app-shell">
       <section class="app-view" data-page="saves">
         <header class="workspace-header">
           <div><p class="eyebrow">PALWORLD 1.0</p><h1><i class="ph ph-database" aria-hidden="true"></i> 世界数据</h1><p>从服务器同步后，浏览储物箱，并安全修改玩家数据。</p></div>
-          <div class="freshness"><span><i class="ph ph-circle" aria-hidden="true"></i> 数据来源：palworld-server</span><button id="pull-save" class="primary"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 从服务器同步</button></div>
+          <div class="freshness"><span><i class="ph ph-circle" aria-hidden="true"></i> 数据来源：目标服务器</span><button id="pull-save" class="primary"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 从服务器同步</button></div>
         </header>
         <nav class="section-nav world-nav" aria-label="世界工作区">
           <button data-route="world/search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i>全局搜索</button>
@@ -51,7 +52,7 @@
         <section class="world-workspace">
           <aside class="source-column">
             <div class="column-heading"><span>数据源</span><button id="refresh" class="icon-button" title="重新扫描本地存档"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span class="sr-only">重新扫描</span></button></div>
-            <div class="source-status"><span class="source-dot"></span><div><strong>palworld-server 世界数据</strong><small>同步后在本机安全编辑</small></div></div>
+            <div class="source-status"><span class="source-dot"></span><div><strong>目标服务器世界数据</strong><small>同步后在本机安全编辑</small></div></div>
             <details class="source-tech"><summary>本地快照位置</summary><p id="root">正在发现 Save 目录…</p></details>
             <div id="worlds" class="worlds"><div class="empty">正在读取存档头…</div></div>
             <div class="source-help"><i class="ph ph-shield-check" aria-hidden="true"></i><p>所有写入都会先备份并校验原始哈希。</p></div>
@@ -97,15 +98,15 @@
       </section>
 
       <section class="app-view hidden" data-page="backups">
-        <header class="workspace-header"><div><p class="eyebrow">SAFE BACKUP RECOVERY</p><h1><i class="ph ph-floppy-disk-back" aria-hidden="true"></i> 备份记录</h1><p>统一查看并安全恢复服务器同步前快照、PalEdit 写入前备份、游戏自动备份和批量箱子编辑备份。</p></div><button id="reload-backups" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 重新扫描</button></header>
+        <header class="workspace-header"><div><p class="eyebrow">SAFE BACKUP RECOVERY</p><h1><i class="ph ph-floppy-disk-back" aria-hidden="true"></i> 备份记录</h1><p>统一查看并安全恢复服务器同步前快照、PalOps 写入前备份、游戏自动备份和批量箱子编辑备份。</p></div><button id="reload-backups" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 重新扫描</button></header>
         <nav class="section-nav world-nav" aria-label="世界工作区"><button data-route="world/containers"><i class="ph ph-archive" aria-hidden="true"></i>储物箱</button><button data-route="world/players"><i class="ph ph-users" aria-hidden="true"></i>玩家</button><button data-route="world/guilds"><i class="ph ph-buildings" aria-hidden="true"></i>公会</button><button data-route="world/backups"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i>备份</button></nav>
         <p id="backup-result" class="sync-result" aria-live="polite"></p><section class="backup-stats"><article><i class="ph ph-archive-box" aria-hidden="true"></i><span><small>备份总数</small><strong id="backup-total">—</strong></span></article><article><i class="ph ph-hard-drives" aria-hidden="true"></i><span><small>占用空间</small><strong id="backup-size">—</strong></span></article><article><i class="ph ph-calendar-x" aria-hidden="true"></i><span><small>超过 30 天</small><strong id="backup-review">—</strong></span></article><article><i class="ph ph-shield-check" aria-hidden="true"></i><span><small>安全恢复</small><strong>恢复前再备份</strong></span></article></section>
-        <section class="panel backup-panel"><div class="backup-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索备份</span><input id="backup-query" type="search" placeholder="搜索备份名称、世界 ID 或路径"></label><label>来源<select id="backup-source"><option value="">全部来源</option><option value="sync">服务器同步前快照</option><option value="editor">PalEdit 写入前备份</option><option value="game">游戏自动备份</option><option value="box_plan">批量箱子编辑备份</option></select></label></div><p id="backup-summary" class="resource-summary">正在扫描本地备份目录…</p><div class="backup-browser"><div id="backup-list" class="backup-list"><div class="empty">正在读取备份索引…</div></div><aside id="backup-detail" class="backup-detail"><div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>恢复、删除和技术路径集中显示在这里。</p></div></aside></div></section>
+        <section class="panel backup-panel"><div class="backup-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索备份</span><input id="backup-query" type="search" placeholder="搜索备份名称、世界 ID 或路径"></label><label>来源<select id="backup-source"><option value="">全部来源</option><option value="sync">服务器同步前快照</option><option value="editor">PalOps 写入前备份</option><option value="game">游戏自动备份</option><option value="box_plan">批量箱子编辑备份</option></select></label></div><p id="backup-summary" class="resource-summary">正在扫描本地备份目录…</p><div class="backup-browser"><div id="backup-list" class="backup-list"><div class="empty">正在读取备份索引…</div></div><aside id="backup-detail" class="backup-detail"><div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>恢复、删除和技术路径集中显示在这里。</p></div></aside></div></section>
       </section>
 
       <section class="app-view hidden" data-page="map">
         <header class="workspace-header map-header">
-          <div><p class="eyebrow">LIVE SERVER + SAVE MAP</p><h1><i class="ph ph-map-trifold" aria-hidden="true"></i> 帕鲁地图</h1><p>结合 palworld-server 在线玩家实时坐标与本地存档中的公会据点，统一查看位置、范围和详情。</p></div>
+          <div><p class="eyebrow">LIVE SERVER + SAVE MAP</p><h1><i class="ph ph-map-trifold" aria-hidden="true"></i> 帕鲁地图</h1><p>结合目标服务器在线玩家实时坐标与本地存档中的公会据点，统一查看位置、范围和详情。</p></div>
           <div class="map-header-actions"><span class="map-resolution-badge"><i class="ph ph-squares-four" aria-hidden="true"></i> 16K 本地瓦片</span><span id="map-snapshot" class="auto-refresh-note">等待服务器接口</span><button id="reload-map" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新位置</button></div>
         </header>
         <p id="map-result" class="sync-result" aria-live="polite"></p>
@@ -136,7 +137,7 @@
             <div id="base-camp-layer" class="map-layer"></div>
             <div id="map-player-layer" class="map-layer"></div>
             <p class="map-attribution">地图瓦片 · palworld-server-tool v0.12.0</p>
-            <div id="map-empty" class="map-empty"><i class="ph ph-map-trifold" aria-hidden="true"></i><strong>正在准备地图</strong><p>将自动读取 palworld-server 当前在线玩家坐标。</p></div>
+            <div id="map-empty" class="map-empty"><i class="ph ph-map-trifold" aria-hidden="true"></i><strong>正在准备地图</strong><p>将自动读取目标服务器当前在线玩家坐标。</p></div>
           </div>
         </section>
         <dialog id="map-detail-dialog" class="map-detail-dialog" aria-labelledby="map-detail-title">
@@ -148,7 +149,7 @@
       </section>
 
       <section class="app-view hidden" data-page="overview">
-        <header class="workspace-header"><div><p class="eyebrow">palworld-server OBSERVABILITY</p><h1>服务器总览</h1><p>实时状态、健康评分与最近 7 天运行趋势。</p></div><span class="auto-refresh-note"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 实时 15 秒 · 历史 60 秒</span></header>
+        <header class="workspace-header"><div><p class="eyebrow">SERVER OBSERVABILITY</p><h1>服务器总览</h1><p>实时状态、健康评分与最近 7 天运行趋势。</p></div><span class="auto-refresh-note"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 实时 15 秒 · 历史 60 秒</span></header>
         <section class="health-dashboard panel" aria-labelledby="overview-state-title">
           <div class="health-score-block"><div id="health-score-ring" class="health-score-ring" style="--health-score:0"><div><strong id="health-score">—</strong><small>健康分</small></div></div><span id="overview-health-icon" class="health-icon"><i class="ph ph-shield-check" aria-hidden="true"></i></span></div>
           <div class="health-summary"><p class="eyebrow">CURRENT HEALTH</p><h2 id="overview-state-title">正在检查服务器</h2><p id="overview-state-copy">读取容器、REST 接口与实时指标。</p><div class="health-signals"><span><small>服务器延迟</small><strong id="health-latency">—</strong></span><span><small>可用率</small><strong id="health-availability">—</strong></span><span><small>异常次数</small><strong id="health-incidents">—</strong></span></div></div>
@@ -196,7 +197,7 @@
       <section class="app-view hidden" data-page="config">
         <header class="workspace-header"><div><p class="eyebrow">SERVER RULES</p><h1>服务器规则</h1><p>按作用搜索并修改规则；技术键名保留为次级信息。</p></div><div class="panel-actions"><button id="export-config" class="secondary" disabled>导出 JSON</button><button id="reload-config" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 刷新</button></div></header>
         <nav class="section-nav manage-nav" aria-label="管理工作区"><button data-route="manage/players"><i class="ph ph-users" aria-hidden="true"></i>在线玩家</button><button data-route="manage/chat"><i class="ph ph-chats-circle" aria-hidden="true"></i>服务器聊天</button><button data-route="manage/rules"><i class="ph ph-sliders-horizontal" aria-hidden="true"></i>服务器规则</button><button data-route="manage/operations"><i class="ph ph-power" aria-hidden="true"></i>维护操作</button></nav>
-        <section class="panel config-panel"><div class="config-toolbar"><div><h2>游戏与服务器设置</h2><p id="config-source">正在读取远端配置…</p></div><label class="config-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">筛选配置</span><input id="config-query" type="search" placeholder="搜索经验、孵化、备份等作用"></label></div><div id="config-settings" class="config-settings"><div class="empty">正在从 palworld-server 读取…</div></div><div class="config-footer"><p id="config-result" class="config-result" aria-live="polite">修改只会在保存后写入服务器；重启前不会应用。</p><button id="save-config" class="primary" disabled>备份并保存</button></div></section>
+        <section class="panel config-panel"><div class="config-toolbar"><div><h2>游戏与服务器设置</h2><p id="config-source">正在读取远端配置…</p></div><label class="config-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">筛选配置</span><input id="config-query" type="search" placeholder="搜索经验、孵化、备份等作用"></label></div><div id="config-settings" class="config-settings"><div class="empty">正在从目标服务器读取…</div></div><div class="config-footer"><p id="config-result" class="config-result" aria-live="polite">修改只会在保存后写入服务器；重启前不会应用。</p><button id="save-config" class="primary" disabled>备份并保存</button></div></section>
         <section class="apply-strip"><div><i class="ph ph-warning-circle" aria-hidden="true"></i><span><strong>应用规则需要重启</strong><small>先保存世界，再重启容器并等待健康检查恢复。</small></span></div><div class="restart-confirmation"><label class="confirm-row"><input id="config-restart-confirm" type="checkbox"><span>我已检查在线玩家并理解连接会暂时中断。</span></label><button id="config-restart" class="danger" disabled>重启服务器</button></div></section>
       </section>
 
@@ -213,7 +214,7 @@
           </section>
           <section class="panel settings-card settings-connection-card">
             <header><span class="settings-icon"><i class="ph ph-plugs-connected" aria-hidden="true"></i></span><div><h2>目标服务器</h2><p>只保存连接定位信息，不读取或保存密码、私钥和 Cookie。</p></div></header>
-            <div class="settings-grid"><label>连接方式<select id="setting-connection-method" name="connection_method"><option value="ssh">SSH 别名 / 主机名</option><option value="direct">Docker Compose 直连</option></select><small id="setting-connection-help">SSH 模式适合在 macOS 上独立运行 PalEdit。</small></label><label id="setting-ssh-host-label">SSH 主机<input id="setting-ssh-host" name="ssh_host" type="text" maxlength="255" required placeholder="palworld-server"></label><label class="span-two"><span id="setting-save-root-label">远端存档目录</span><input id="setting-remote-save-root" name="remote_save_root" type="text" maxlength="512" required><small id="setting-save-root-help">Palworld 宿主机上的 Pal/Saved 绝对路径。</small></label><label class="span-two"><span id="setting-compose-label">Compose 文件</span><input id="setting-remote-compose" name="remote_compose_path" type="text" maxlength="512" required><small id="setting-compose-help">包含 palworld-server 服务的 Compose 绝对路径。</small></label><label>容器名称<input id="setting-container-name" name="container_name" type="text" maxlength="255" required></label><label>Docker 路径<input id="setting-docker-path" name="docker_path" type="text" maxlength="512" required></label><label>RCON 工具路径<input id="setting-rcon-path" name="rcon_path" type="text" maxlength="512" required></label><label>RCON 端口<input id="setting-rcon-port" name="rcon_port" type="number" min="1" max="65535" required></label></div>
+            <div class="settings-grid"><label>连接方式<select id="setting-connection-method" name="connection_method"><option value="ssh">SSH 别名 / 主机名</option><option value="direct">Docker Compose 直连</option></select><small id="setting-connection-help">SSH 模式适合在 macOS 上独立运行 PalOps。</small></label><label id="setting-ssh-host-label">SSH 主机<input id="setting-ssh-host" name="ssh_host" type="text" maxlength="255" required placeholder="palworld-server"></label><label class="span-two"><span id="setting-save-root-label">远端存档目录</span><input id="setting-remote-save-root" name="remote_save_root" type="text" maxlength="512" required><small id="setting-save-root-help">Palworld 宿主机上的 Pal/Saved 绝对路径。</small></label><label class="span-two"><span id="setting-compose-label">Compose 文件</span><input id="setting-remote-compose" name="remote_compose_path" type="text" maxlength="512" required><small id="setting-compose-help">包含 palworld-server 服务的 Compose 绝对路径。</small></label><label>容器名称<input id="setting-container-name" name="container_name" type="text" maxlength="255" required></label><label>Docker 路径<input id="setting-docker-path" name="docker_path" type="text" maxlength="512" required></label><label>RCON 工具路径<input id="setting-rcon-path" name="rcon_path" type="text" maxlength="512" required></label><label>RCON 端口<input id="setting-rcon-port" name="rcon_port" type="number" min="1" max="65535" required></label></div>
             <div class="settings-connection-test"><button id="test-app-connection" class="secondary" type="button"><i class="ph ph-pulse" aria-hidden="true"></i> 测试已保存连接</button><span id="settings-test-result" aria-live="polite">测试不会修改服务器。</span></div>
           </section>
           <footer class="panel settings-footer"><div><strong>本机设置</strong><p id="settings-storage-path">正在读取保存位置…</p><small id="settings-note">不会保存敏感凭据。</small></div><div><p id="settings-result" class="config-result" aria-live="polite">等待修改</p><button id="save-app-settings" class="primary" type="submit" disabled>保存基础设置</button></div></footer>
@@ -228,7 +229,7 @@
           <div class="operation-pane hidden" data-operation-pane="player"><div class="operation-title"><span class="step-number"><i class="ph ph-user-focus" aria-hidden="true"></i></span><div><h2>玩家管理</h2><p>玩家 ID 由在线列表自动映射，不支持手动输入。</p></div></div><div class="form-grid single"><label>选择操作<select id="player-action"><option value="kick">踢出玩家</option><option value="ban">封禁玩家</option></select></label><label>选择在线玩家<select id="player-select"><option value="">正在读取在线玩家…</option></select></label></div><label class="confirm-row"><input id="player-confirm" type="checkbox"><span>我确认要对所选玩家执行此操作。</span></label><button id="run-player-action" class="danger wide" disabled>执行玩家操作</button></div>
           <div class="operation-pane hidden" data-operation-pane="advanced"><div class="operation-title"><span class="step-number"><i class="ph ph-terminal-window" aria-hidden="true"></i></span><div><h2>其他操作</h2><p>仅开放官方白名单指令，参数均由界面生成。</p></div></div><div class="form-grid single"><label>操作<select id="advanced-action"><option value="save">保存世界</option><option value="broadcast">发送广播</option><option value="shutdown">计划关服</option></select></label><label id="advanced-message-wrap" class="hidden">广播模板<select id="advanced-message"><option value="服务器将在 5 分钟后维护，请尽快返回安全区域。">5 分钟维护提醒</option><option value="服务器维护已经完成，欢迎回来。">维护完成通知</option><option value="请注意：服务器即将保存世界，可能短暂卡顿。">保存世界提醒</option></select></label><label id="advanced-seconds-wrap" class="hidden">倒计时<select id="advanced-seconds"><option value="300">5 分钟</option><option value="120">2 分钟</option><option value="60">1 分钟</option><option value="30">30 秒</option></select></label></div><label class="confirm-row"><input id="advanced-confirm" type="checkbox"><span>我确认执行所选官方操作。</span></label><button id="run-advanced-action" class="primary wide" disabled>执行所选操作</button></div><p id="operation-result" class="operation-result" aria-live="polite">等待操作</p>
           </section>
-          <aside class="server-context"><section><div class="aside-heading"><h2>当前玩家</h2></div><div id="online-players" class="online-players"><p>正在读取在线列表…</p></div></section><section><div class="aside-heading"><h2>管理连接</h2><span id="rcon-state" class="connection-state loading">检查中</span></div><p class="aside-copy">地址与凭据保留在 palworld-server 容器内。</p></section><section><h2>本次维护日志</h2><div id="operation-log" class="operation-log"><p>本次会话尚无写操作</p></div></section></aside></div>
+          <aside class="server-context"><section><div class="aside-heading"><h2>当前玩家</h2></div><div id="online-players" class="online-players"><p>正在读取在线列表…</p></div></section><section><div class="aside-heading"><h2>管理连接</h2><span id="rcon-state" class="connection-state loading">检查中</span></div><p class="aside-copy">地址与凭据保留在目标服务器容器内。</p></section><section><h2>本次维护日志</h2><div id="operation-log" class="operation-log"><p>本次会话尚无写操作</p></div></section></aside></div>
       </section>
 
       <section class="app-view hidden" data-page="data">
@@ -242,8 +243,8 @@
   </div>
 
   <dialog id="restart-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-warning"></i></span><h2>再次确认重启服务器</h2><p>继续后将立即保存世界、重启 <code>palworld-server</code>，在线玩家会断开连接。</p><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-config-restart" value="confirm" class="danger">确认并立即重启</button></div></form></dialog>
-  <dialog id="backup-restore-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-clock-counter-clockwise"></i></span><h2>确认恢复本地世界</h2><p>恢复只作用于本机 <code>Save</code>。当前世界会先完整备份，再由已校验的快照原子替换。</p><dl class="restore-summary"><div><dt>世界</dt><dd><code id="restore-world-id"></code></dd></div><div><dt>备份</dt><dd id="restore-backup-name"></dd></div><div><dt>当前哈希</dt><dd><code id="restore-current-hash"></code></dd></div><div><dt>备份哈希</dt><dd><code id="restore-backup-hash"></code></dd></div></dl><label class="confirm-row"><input id="backup-restore-confirm" type="checkbox"><span>我确认要用所选备份替换当前本地世界，并已理解远端 palworld-server 不会被修改。</span></label><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-backup-restore" value="confirm" class="danger" disabled>备份当前世界并恢复</button></div></form></dialog>
-  <dialog id="backup-delete-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-trash"></i></span><h2>永久删除本地备份</h2><p>此操作会永久移除所选备份目录并释放空间，不会影响当前世界或远端 palworld-server。</p><dl class="restore-summary"><div><dt>备份</dt><dd id="delete-backup-name"></dd></div><div><dt>来源</dt><dd id="delete-backup-source"></dd></div><div><dt>世界</dt><dd><code id="delete-backup-world"></code></dd></div><div><dt>占用</dt><dd id="delete-backup-size"></dd></div></dl><label class="confirm-row"><input id="backup-delete-confirm" type="checkbox"><span>我确认永久删除这一份备份；如果目录在确认后发生变化，后端将拒绝操作。</span></label><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-backup-delete" value="confirm" class="danger" disabled>永久删除备份</button></div></form></dialog>
+  <dialog id="backup-restore-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-clock-counter-clockwise"></i></span><h2>确认恢复本地世界</h2><p>恢复只作用于本机 <code>Save</code>。当前世界会先完整备份，再由已校验的快照原子替换。</p><dl class="restore-summary"><div><dt>世界</dt><dd><code id="restore-world-id"></code></dd></div><div><dt>备份</dt><dd id="restore-backup-name"></dd></div><div><dt>当前哈希</dt><dd><code id="restore-current-hash"></code></dd></div><div><dt>备份哈希</dt><dd><code id="restore-backup-hash"></code></dd></div></dl><label class="confirm-row"><input id="backup-restore-confirm" type="checkbox"><span>我确认要用所选备份替换当前本地世界，并已理解远端服务器不会被修改。</span></label><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-backup-restore" value="confirm" class="danger" disabled>备份当前世界并恢复</button></div></form></dialog>
+  <dialog id="backup-delete-dialog" class="confirm-dialog"><form method="dialog"><span class="dialog-icon"><i class="ph ph-trash"></i></span><h2>永久删除本地备份</h2><p>此操作会永久移除所选备份目录并释放空间，不会影响当前世界或远端服务器。</p><dl class="restore-summary"><div><dt>备份</dt><dd id="delete-backup-name"></dd></div><div><dt>来源</dt><dd id="delete-backup-source"></dd></div><div><dt>世界</dt><dd><code id="delete-backup-world"></code></dd></div><div><dt>占用</dt><dd id="delete-backup-size"></dd></div></dl><label class="confirm-row"><input id="backup-delete-confirm" type="checkbox"><span>我确认永久删除这一份备份；如果目录在确认后发生变化，后端将拒绝操作。</span></label><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirm-backup-delete" value="confirm" class="danger" disabled>永久删除备份</button></div></form></dialog>
 
   <template id="world-template"><article class="world-card"><div class="world-main"><span class="status"></span><div><h3></h3><p class="meta"></p></div></div><div class="facts"><span class="format"></span><span class="players"></span><span class="backups"></span></div><div class="actions"><button class="inspect">打开世界数据</button><span class="result">尚未诊断</span></div></article></template>
   <template id="item-template"><button class="item-row"><span class="item-icon-wrap"><img class="item-icon" alt="" loading="lazy"><i class="ph ph-package"></i></span><span class="item-copy"><strong class="item-name"></strong><small class="item-description"></small></span><code class="item-id"></code><span class="item-category"></span><span class="localization"></span></button></template>

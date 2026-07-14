@@ -171,7 +171,7 @@ function normalizedSettingValue(value) {
 }
 
 function targetHost() {
-  return appSettings?.settings?.connection_method === 'direct' ? '本机 Docker' : (appSettings?.settings?.ssh_host || 'palworld-server');
+  return appSettings?.settings?.connection_method === 'direct' ? '本机 Docker' : (appSettings?.settings?.ssh_host || '目标服务器');
 }
 
 function updateTargetHostLabels(host, method = 'ssh') {
@@ -185,7 +185,7 @@ function updateTargetHostLabels(host, method = 'ssh') {
   if (worldSource) worldSource.textContent = `${host} 世界数据`;
   if (localNote) localNote.innerHTML = method === 'direct'
     ? `<i class="ph ph-hard-drives" aria-hidden="true"></i> Docker 直连 · 源文件由容器挂载`
-    : `<i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalEdit`;
+    : `<i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalOps`;
   if (overviewEyebrow) overviewEyebrow.textContent = `${host} OBSERVABILITY`;
   if (connectionCopy) connectionCopy.textContent = method === 'direct'
     ? '通过挂载的 Docker socket 访问服务器容器。'
@@ -197,15 +197,15 @@ function renderConnectionMethod() {
   const direct = method === 'direct';
   document.querySelector('#setting-ssh-host-label')?.classList.toggle('hidden', direct);
   document.querySelector('#setting-connection-help').textContent = direct
-    ? 'PalEdit 与游戏服务器部署在同一宿主机，通过挂载路径和 Docker socket 直接访问。'
-    : 'SSH 模式适合在 macOS 上独立运行 PalEdit。';
+    ? 'PalOps 与游戏服务器部署在同一宿主机，通过挂载路径和 Docker socket 直接访问。'
+    : 'SSH 模式适合在 macOS 上独立运行 PalOps。';
   document.querySelector('#setting-save-root-label').textContent = direct ? '容器内存档挂载目录' : '远端存档目录';
   document.querySelector('#setting-save-root-help').textContent = direct
-    ? '挂载到 PalEdit 容器内的 Pal/Saved 绝对路径。'
+    ? '挂载到 PalOps 容器内的 Pal/Saved 绝对路径。'
     : 'Palworld 宿主机上的 Pal/Saved 绝对路径。';
   document.querySelector('#setting-compose-label').textContent = direct ? '容器内 Compose 挂载文件' : 'Compose 文件';
   document.querySelector('#setting-compose-help').textContent = direct
-    ? '挂载到 PalEdit 容器内的 Compose 文件，保持可写以使配置保存生效。'
+    ? '挂载到 PalOps 容器内的 Compose 文件，保持可写以使配置保存生效。'
     : '包含 palworld-server 服务的 Compose 绝对路径。';
 }
 

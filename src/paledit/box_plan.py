@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID
 
 from .items import load_item_index
 
@@ -12,22 +16,33 @@ class BoxPlan:
     items: tuple[tuple[str, int], ...]
 
 
-BOXES = (
-    ("00000000-0000-0000-0000-000000000202", "物资箱-高级物品"),
-    ("00000000-0000-0000-0000-000000000201", "物资箱-高级矿石"),
-    ("00000000-0000-0000-0000-000000000203", "物资箱-加工材料"),
-    ("00000000-0000-0000-0000-000000000204", "物资箱-捕捉货币"),
-    ("00000000-0000-0000-0000-000000000205", "物资箱-通用培养"),
-    ("00000000-0000-0000-0000-000000000206", "物资箱-战斗植入"),
-    ("00000000-0000-0000-0000-000000000207", "物资箱-工作植入"),
-    ("00000000-0000-0000-0000-000000000208", "物资箱-工作适性"),
-    ("00000000-0000-0000-0000-000000000209", "物资箱-技能果实-AF"),
-    ("00000000-0000-0000-0000-000000000210", "物资箱-技能果实-FR"),
-    ("00000000-0000-0000-0000-000000000211", "物资箱-技能果实-RW"),
-    ("00000000-0000-0000-0000-000000000212", "物资箱-Raid石板"),
-    ("00000000-0000-0000-0000-000000000213", "物资箱-武器图纸"),
-    ("00000000-0000-0000-0000-000000000214", "物资箱-防具扩展"),
+BOX_LABELS = (
+    "物资箱-高级物品", "物资箱-高级矿石", "物资箱-加工材料", "物资箱-捕捉货币",
+    "物资箱-通用培养", "物资箱-战斗植入", "物资箱-工作植入", "物资箱-工作适性",
+    "物资箱-技能果实-AF", "物资箱-技能果实-FR", "物资箱-技能果实-RW",
+    "物资箱-Raid石板", "物资箱-武器图纸", "物资箱-防具扩展",
 )
+DEFAULT_BOX_TARGETS_PATH = Path(".paledit-data/box-targets.json")
+
+
+def load_box_targets(path: Path | None = None) -> tuple[tuple[str, str], ...]:
+    target_path = path or Path(os.environ.get("PALOPS_BOX_TARGETS", DEFAULT_BOX_TARGETS_PATH))
+    try:
+        payload = json.loads(target_path.expanduser().read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise ValueError(f"未配置批量箱子目标：{target_path}") from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"读取批量箱子目标失败：{error}") from error
+    container_ids = payload.get("container_ids") if isinstance(payload, dict) else None
+    if not isinstance(container_ids, list) or len(container_ids) != len(BOX_LABELS):
+        raise ValueError(f"批量箱子目标必须包含 {len(BOX_LABELS)} 个 container_ids")
+    try:
+        normalized = tuple(str(UUID(str(value))) for value in container_ids)
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("批量箱子目标包含无效的容器 GUID") from error
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("批量箱子目标包含重复的容器 GUID")
+    return tuple(zip(normalized, BOX_LABELS, strict=True))
 
 HIGH_VALUE = (
     "WingGlider_Fuel", "LuxuryMedicines", "MindControlDrug", "Potion_Extreme",
@@ -128,7 +143,10 @@ def _blueprints(index: dict[str, dict[str, object]], terms: tuple[str, ...]) -> 
     ))[:54]
 
 
-def build_box_plan() -> tuple[BoxPlan, ...]:
+def build_box_plan(boxes: tuple[tuple[str, str], ...] | None = None) -> tuple[BoxPlan, ...]:
+    boxes = boxes or load_box_targets()
+    if len(boxes) != len(BOX_LABELS):
+        raise ValueError(f"批量箱子目标必须包含 {len(BOX_LABELS)} 个容器")
     index = {str(row["id"]): row for row in load_item_index()["items"]}
     skills = sorted(item_id for item_id in index if item_id.startswith("SkillCard_"))
     if len(skills) != 93:
@@ -151,4 +169,4 @@ def build_box_plan() -> tuple[BoxPlan, ...]:
          999 if item_id.startswith(("PalPassiveSkillChange_", "WorkSuitability_", "PalSummon_"))
          or item_id in {"AncientParts2", "PredatorCrystal", "MeteorDrop"} else 9999)
         for item_id in group
-    )) for (container_id, label), group in zip(BOXES, groups, strict=True))
+    )) for (container_id, label), group in zip(boxes, groups, strict=True))

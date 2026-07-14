@@ -11,7 +11,7 @@ from .save import inspect_save, sha256
 
 SOURCE_LABELS = {
     "sync": "服务器同步前快照",
-    "editor": "PalEdit 写入前备份",
+    "editor": "PalOps 写入前备份",
     "game": "游戏自动备份",
     "box_plan": "批量箱子编辑备份",
 }

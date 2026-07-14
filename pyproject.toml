@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "paledit"
+name = "palops"
 version = "0.1.0"
-description = "A safety-first Palworld 1.0 save editor for macOS"
+description = "A safety-first Palworld 1.0 server operations and save management console"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,6 +19,9 @@ dependencies = [
 dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
 
 [project.scripts]
+palops = "paledit.cli:main"
+palops-box-job = "paledit.box_job:main"
+# Compatibility aliases retained for existing scripts and installations.
 paledit = "paledit.cli:main"
 paledit-box-job = "paledit.box_job:main"
 

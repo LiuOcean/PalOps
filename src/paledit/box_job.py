@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,8 +16,6 @@ from .box_editor import apply_box_plan
 from .box_plan import build_box_plan
 from .remote import (
     REMOTE_DOCKER,
-    REMOTE_HOST,
-    REMOTE_SAVE_ROOT,
     SERVER_CONTAINER,
     _rcon,
     _ssh,
@@ -24,13 +23,21 @@ from .remote import (
     list_online_players,
 )
 from .save import sha256
+from .settings import load_settings
 from .world import list_storage_containers
 
-WORLD_ID = "00000000000000000000000000000000"
-REMOTE_WORLD = f"{REMOTE_SAVE_ROOT}/SaveGames/0/{WORLD_ID}"
-REMOTE_BACKUP_ROOT = f"{REMOTE_SAVE_ROOT}/PalEdit-Remote-Backup"
 STATE_PATH = Path(__file__).resolve().parents[2] / ".artifacts" / "box-job-state.json"
 LOCK_PATH = STATE_PATH.with_suffix(".lock")
+
+
+def _target_paths() -> tuple[str, str, str, str]:
+    world_id = os.environ.get("PALWORLD_WORLD_ID", "").strip()
+    if not re.fullmatch(r"[0-9A-Fa-f]{32}", world_id):
+        raise ValueError("必须通过 PALWORLD_WORLD_ID 配置 32 位世界 ID")
+    connection = load_settings()
+    remote_world = f"{connection.remote_save_root}/SaveGames/0/{world_id}"
+    backup_root = f"{connection.remote_save_root}/PalEdit-Remote-Backup"
+    return connection.ssh_host, world_id, remote_world, backup_root
 
 
 def _result(status: str, **details: object) -> dict[str, object]:
@@ -61,19 +68,19 @@ def _write_state(payload: dict[str, object]) -> None:
     os.replace(temporary, STATE_PATH)
 
 
-def _rsync_from_remote(destination: Path) -> None:
+def _rsync_from_remote(destination: Path, remote_host: str, remote_world: str) -> None:
     subprocess.run([
         "rsync", "-a", "--delete",
         "--exclude", "backup/", "--exclude", "PalEdit-Backup/",
         "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10",
-        f"{REMOTE_HOST}:{REMOTE_WORLD}/", f"{destination}/",
+        f"{remote_host}:{remote_world}/", f"{destination}/",
     ], check=True, capture_output=True, text=True, timeout=180)
 
 
-def _rsync_level_to_remote(level_path: Path, remote_temporary: str) -> None:
+def _rsync_level_to_remote(level_path: Path, remote_host: str, remote_temporary: str) -> None:
     subprocess.run([
         "rsync", "-a", "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10",
-        str(level_path), f"{REMOTE_HOST}:{remote_temporary}",
+        str(level_path), f"{remote_host}:{remote_temporary}",
     ], check=True, capture_output=True, text=True, timeout=180)
 
 
@@ -87,8 +94,8 @@ def _verify_world(world_path: Path, container_ids: set[str] | None = None) -> di
     for container_id, plan in expected.items():
         row = actual[container_id]
         slots = tuple((str(slot["item_id"]), int(slot["count"])) for slot in row["slots"])
-        if row["label"] != plan.label or slots != plan.items:
-            raise RuntimeError(f"箱子验证不一致：{container_id} {row['label']}")
+        if slots != plan.items:
+            raise RuntimeError(f"箱子验证不一致：{container_id}")
     return {
         "level_sha256": report["level_sha256"],
         "box_count": len(expected),
@@ -108,13 +115,15 @@ def _wait_until_healthy(timeout: int = 180) -> dict[str, object]:
 
 
 def preflight() -> dict[str, object]:
+    _, _, remote_world, _ = _target_paths()
     state = get_server_status()
     players = list_online_players()
-    level = _ssh(["/usr/bin/stat", "-f", "%z|%m", f"{REMOTE_WORLD}/Level.sav"]).stdout.strip()
+    level = _ssh(["/usr/bin/stat", "-f", "%z|%m", f"{remote_world}/Level.sav"]).stdout.strip()
     return _result("ready" if not players else "players_online", server=state, players=players, remote_level=level)
 
 
 def run_once(*, force_with_players: bool = False, container_ids: set[str] | None = None) -> dict[str, object]:
+    remote_host, world_id, remote_world, remote_backup_root = _target_paths()
     fingerprint = _plan_fingerprint(container_ids)
     if STATE_PATH.exists():
         previous = json.loads(STATE_PATH.read_text())
@@ -128,7 +137,7 @@ def run_once(*, force_with_players: bool = False, container_ids: set[str] | None
     stopped = False
     replaced = False
     backup = ""
-    remote_temporary = f"{REMOTE_WORLD}/.Level.sav.paledit-boxes-{os.getpid()}.tmp"
+    remote_temporary = f"{remote_world}/.Level.sav.paledit-boxes-{os.getpid()}.tmp"
     try:
         players = list_online_players()
         if players and not force_with_players:
@@ -144,28 +153,28 @@ def run_once(*, force_with_players: bool = False, container_ids: set[str] | None
         stopped = True
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = f"{REMOTE_BACKUP_ROOT}/{stamp}/{WORLD_ID}"
+        backup = f"{remote_backup_root}/{stamp}/{world_id}"
         _ssh(["/bin/mkdir", "-p", str(Path(backup).parent)])
-        _ssh(["/bin/cp", "-a", REMOTE_WORLD, backup], timeout=180)
+        _ssh(["/bin/cp", "-a", remote_world, backup], timeout=180)
 
         with tempfile.TemporaryDirectory(prefix="paledit-box-job-") as temporary:
-            world = Path(temporary) / WORLD_ID
+            world = Path(temporary) / world_id
             world.mkdir()
-            _rsync_from_remote(world)
+            _rsync_from_remote(world, remote_host, remote_world)
             before = sha256(world / "Level.sav")
             edit = apply_box_plan(world, expected_sha256=before, container_ids=container_ids)
             local_verification = _verify_world(world, container_ids)
-            _rsync_level_to_remote(world / "Level.sav", remote_temporary)
-            _ssh(["/bin/mv", remote_temporary, f"{REMOTE_WORLD}/Level.sav"])
+            _rsync_level_to_remote(world / "Level.sav", remote_host, remote_temporary)
+            _ssh(["/bin/mv", remote_temporary, f"{remote_world}/Level.sav"])
             replaced = True
 
             _ssh([REMOTE_DOCKER, "start", SERVER_CONTAINER], timeout=60)
             stopped = False
             server = _wait_until_healthy()
             time.sleep(5)
-            verify_world = Path(temporary) / "verify" / WORLD_ID
+            verify_world = Path(temporary) / "verify" / world_id
             verify_world.mkdir(parents=True)
-            _rsync_from_remote(verify_world)
+            _rsync_from_remote(verify_world, remote_host, remote_world)
             remote_verification = _verify_world(verify_world, container_ids)
 
         result = _result(
@@ -182,7 +191,7 @@ def run_once(*, force_with_players: bool = False, container_ids: set[str] | None
                 if get_server_status().get("state") == "running":
                     _ssh([REMOTE_DOCKER, "stop", "--time", "60", SERVER_CONTAINER], timeout=90)
                     stopped = True
-                _ssh(["/bin/cp", "-a", f"{backup}/Level.sav", f"{REMOTE_WORLD}/Level.sav"], timeout=180)
+                _ssh(["/bin/cp", "-a", f"{backup}/Level.sav", f"{remote_world}/Level.sav"], timeout=180)
             if stopped or get_server_status().get("state") != "running":
                 _ssh([REMOTE_DOCKER, "start", SERVER_CONTAINER], timeout=60)
                 _wait_until_healthy()

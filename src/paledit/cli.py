@@ -7,11 +7,11 @@ from .save import discover_worlds, sha256
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="paledit")
+    parser = argparse.ArgumentParser(prog="palops")
     subparsers = parser.add_subparsers(dest="command", required=True)
     inspect_parser = subparsers.add_parser("inspect", help="只读检查世界存档")
     inspect_parser.add_argument("world", type=Path)
-    serve_parser = subparsers.add_parser("serve", help="启动本地编辑器")
+    serve_parser = subparsers.add_parser("serve", help="启动本地管理控制台")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", default=18765, type=int)
     discover_parser = subparsers.add_parser("discover", help="发现服务器世界")

@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await sampler
 
-app = FastAPI(title="PalEdit", version=__version__, lifespan=lifespan)
+app = FastAPI(title="PalOps", version=__version__, lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=STATIC_ROOT), name="assets")
 
 

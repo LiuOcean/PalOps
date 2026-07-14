@@ -1,8 +1,13 @@
-from paledit.box_plan import build_box_plan
+from uuid import UUID
+
+from paledit.box_plan import BOX_LABELS, build_box_plan
+
+
+BOXES = tuple((str(UUID(int=index + 1)), label) for index, label in enumerate(BOX_LABELS))
 
 
 def test_box_plan_has_14_unique_boxes_and_fits_capacity() -> None:
-    plans = build_box_plan()
+    plans = build_box_plan(BOXES)
     assert len(plans) == 14
     assert len({plan.container_id for plan in plans}) == 14
     assert len({plan.label for plan in plans}) == 14
@@ -37,5 +42,5 @@ def test_box_plan_has_14_unique_boxes_and_fits_capacity() -> None:
 
 
 def test_box_plan_uses_only_unique_items() -> None:
-    item_ids = [item_id for plan in build_box_plan() for item_id, _ in plan.items]
+    item_ids = [item_id for plan in build_box_plan(BOXES) for item_id, _ in plan.items]
     assert len(item_ids) == len(set(item_ids))
