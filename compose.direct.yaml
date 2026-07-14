@@ -5,17 +5,16 @@ services:
       dockerfile: Dockerfile
     container_name: palops
     restart: unless-stopped
+    working_dir: /state
     ports:
-      - "${PALOPS_BIND_ADDRESS:-${PALEDIT_BIND_ADDRESS:-127.0.0.1}}:18765:18765"
+      - "${PALOPS_BIND_ADDRESS:-${PALEDIT_BIND_ADDRESS:-0.0.0.0}}:18765:18765"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - paledit-data:/app/.paledit-data
-      - paledit-save-cache:/app/Save
+      - palops-state:/state
       - "${PALWORLD_SERVICE_ROOT:-/srv/palworld}:${PALWORLD_SERVICE_ROOT:-/srv/palworld}"
       - "${PALWORLD_SAVE_ROOT:-/srv/palworld/Pal/Saved}:${PALWORLD_SAVE_ROOT:-/srv/palworld/Pal/Saved}:ro"
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
-  paledit-data:
-  paledit-save-cache:
+  palops-state:
