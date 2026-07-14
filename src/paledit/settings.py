@@ -34,6 +34,10 @@ class AppSettings:
     def dump(self) -> dict[str, object]:
         return asdict(self)
 
+    @property
+    def public_access_hostname(self) -> str:
+        return _parse_public_access_address(self.public_access_host)[0] if self.public_access_host else ""
+
 
 def _revision(settings: AppSettings) -> str:
     encoded = json.dumps(settings.dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -47,6 +51,30 @@ def _valid_public_host(value: str) -> bool:
     except ValueError:
         labels = value.split(".")
         return len(value) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in labels)
+
+
+def _parse_public_access_address(value: str) -> tuple[str, int | None]:
+    host = value
+    port: int | None = None
+    if value.startswith("["):
+        match = re.fullmatch(r"\[([^]]+)](?::([0-9]+))?", value)
+        if not match:
+            raise ValueError
+        host = match.group(1)
+        port_text = match.group(2)
+    elif value.count(":") == 1:
+        host, port_text = value.rsplit(":", 1)
+        if not port_text.isdigit():
+            raise ValueError
+    else:
+        port_text = None
+    if not _valid_public_host(host):
+        raise ValueError
+    if port_text is not None:
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            raise ValueError
+    return host, port
 
 
 def _validated(payload: dict[str, object]) -> AppSettings:
@@ -82,8 +110,11 @@ def _validated(payload: dict[str, object]) -> AppSettings:
     container_name = str(merged["container_name"]).strip()
     if not _SAFE_NAME.fullmatch(ssh_host):
         raise ValueError("SSH 主机必须是安全的主机名或 SSH 别名")
-    if public_access_host and not _valid_public_host(public_access_host):
-        raise ValueError("公网访问地址必须是有效的域名或 IP，且不包含协议和端口")
+    if public_access_host:
+        try:
+            _parse_public_access_address(public_access_host)
+        except ValueError as error:
+            raise ValueError("公网访问地址必须是有效的域名、IP 或主机:端口") from error
     if not _SAFE_NAME.fullmatch(container_name):
         raise ValueError("容器名称格式无效")
     connection_method = str(merged["connection_method"]).strip()

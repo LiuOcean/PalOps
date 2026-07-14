@@ -157,7 +157,7 @@ def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess
 def measure_server_latency() -> float:
     """Measure the round trip to the configured public player-facing host."""
     connection = load_settings()
-    hostname = connection.public_access_host
+    hostname = connection.public_access_hostname
     if not hostname:
         raise RuntimeError("请先在基础设置中填写公网访问地址")
     try:

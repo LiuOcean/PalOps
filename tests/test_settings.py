@@ -59,7 +59,10 @@ def test_settings_accept_docker_direct_connection(tmp_path: Path) -> None:
     assert load_settings(path).remote_save_root == "/srv/palworld/Pal/Saved"
 
 
-@pytest.mark.parametrize("host", ["play.example.com", "192.0.2.10", "2001:db8::10"])
+@pytest.mark.parametrize(
+    "host",
+    ["play.example.com", "play.example.com:80", "192.0.2.10:8211", "2001:db8::10", "[2001:db8::10]:8211"],
+)
 def test_settings_accept_public_host_names_and_ip_addresses(tmp_path: Path, host: str) -> None:
     path = tmp_path / "settings.json"
     initial = settings_payload(path)
@@ -85,7 +88,8 @@ def test_settings_reject_stale_revision_without_writing(tmp_path: Path) -> None:
         ({"status_refresh_seconds": 1}, "5–300"),
         ({"ssh_host": "bad host"}, "SSH 主机"),
         ({"public_access_host": "https://play.example.com:8211"}, "公网访问地址"),
-        ({"public_access_host": "play.example.com:8211"}, "公网访问地址"),
+        ({"public_access_host": "play.example.com:0"}, "公网访问地址"),
+        ({"public_access_host": "play.example.com:70000"}, "公网访问地址"),
         ({"remote_save_root": "relative/path"}, "绝对路径"),
         ({"rcon_port": 70000}, "1–65535"),
         ({"connection_method": "http"}, "SSH 或 Docker 直连"),

@@ -12,7 +12,7 @@ def test_measure_server_latency_uses_configured_public_host(monkeypatch) -> None
     monkeypatch.setattr(
         remote,
         "load_settings",
-        lambda: AppSettings(public_access_host="play.example.com"),
+        lambda: AppSettings(public_access_host="play.example.com:80"),
     )
     monkeypatch.setattr(
         remote.subprocess,
