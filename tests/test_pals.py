@@ -17,3 +17,11 @@ def test_pal_lookup_accepts_save_id_case_variants() -> None:
     pal = get_pal("Sheepball")
     assert pal is not None
     assert pal["name_zh"] == "棉悠悠"
+
+
+def test_pal_catalog_supports_browsing_past_the_first_page() -> None:
+    first = search_pals("", 100)
+    second = search_pals("", 100, 100)
+    assert first["match_count"] == first["total_pals"]
+    assert second["offset"] == 100
+    assert first["results"][-1]["character_id"] != second["results"][0]["character_id"]

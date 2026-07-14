@@ -26,3 +26,11 @@ def test_skill_lookup_and_unknown_fallback() -> None:
         "description": "",
         "rank": None,
     }
+
+
+def test_skill_catalog_supports_browsing_past_the_first_page() -> None:
+    first = search_skills("", 100)
+    second = search_skills("", 100, 100)
+    assert first["match_count"] == first["total_skills"]
+    assert second["offset"] == 100
+    assert first["results"][-1]["skill_id"] != second["results"][0]["skill_id"]

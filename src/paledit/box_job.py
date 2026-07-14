@@ -37,8 +37,19 @@ def _result(status: str, **details: object) -> dict[str, object]:
     return {"status": status, "timestamp": datetime.now().astimezone().isoformat(), **details}
 
 
-def _plan_fingerprint() -> str:
-    payload = [(plan.container_id, plan.label, plan.items) for plan in build_box_plan()]
+def _selected_plans(container_ids: set[str] | None = None):
+    plans = tuple(
+        plan for plan in build_box_plan()
+        if container_ids is None or plan.container_id in container_ids
+    )
+    if container_ids is not None and container_ids != {plan.container_id for plan in plans}:
+        missing = container_ids - {plan.container_id for plan in plans}
+        raise ValueError(f"计划中不存在目标容器：{', '.join(sorted(missing))}")
+    return plans
+
+
+def _plan_fingerprint(container_ids: set[str] | None = None) -> str:
+    payload = [(plan.container_id, plan.label, plan.items) for plan in _selected_plans(container_ids)]
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -66,8 +77,8 @@ def _rsync_level_to_remote(level_path: Path, remote_temporary: str) -> None:
     ], check=True, capture_output=True, text=True, timeout=180)
 
 
-def _verify_world(world_path: Path) -> dict[str, object]:
-    expected = {plan.container_id: plan for plan in build_box_plan()}
+def _verify_world(world_path: Path, container_ids: set[str] | None = None) -> dict[str, object]:
+    expected = {plan.container_id: plan for plan in _selected_plans(container_ids)}
     report = list_storage_containers(world_path)
     actual = {str(row["container_id"]): row for row in report["containers"]}
     missing = sorted(set(expected) - set(actual))
@@ -103,8 +114,8 @@ def preflight() -> dict[str, object]:
     return _result("ready" if not players else "players_online", server=state, players=players, remote_level=level)
 
 
-def run_once(*, force_with_players: bool = False) -> dict[str, object]:
-    fingerprint = _plan_fingerprint()
+def run_once(*, force_with_players: bool = False, container_ids: set[str] | None = None) -> dict[str, object]:
+    fingerprint = _plan_fingerprint(container_ids)
     if STATE_PATH.exists():
         previous = json.loads(STATE_PATH.read_text())
         if previous.get("status") == "complete" and previous.get("plan_fingerprint") == fingerprint:
@@ -142,8 +153,8 @@ def run_once(*, force_with_players: bool = False) -> dict[str, object]:
             world.mkdir()
             _rsync_from_remote(world)
             before = sha256(world / "Level.sav")
-            edit = apply_box_plan(world, expected_sha256=before)
-            local_verification = _verify_world(world)
+            edit = apply_box_plan(world, expected_sha256=before, container_ids=container_ids)
+            local_verification = _verify_world(world, container_ids)
             _rsync_level_to_remote(world / "Level.sav", remote_temporary)
             _ssh(["/bin/mv", remote_temporary, f"{REMOTE_WORLD}/Level.sav"])
             replaced = True
@@ -155,7 +166,7 @@ def run_once(*, force_with_players: bool = False) -> dict[str, object]:
             verify_world = Path(temporary) / "verify" / WORLD_ID
             verify_world.mkdir(parents=True)
             _rsync_from_remote(verify_world)
-            remote_verification = _verify_world(verify_world)
+            remote_verification = _verify_world(verify_world, container_ids)
 
         result = _result(
             "complete", plan_fingerprint=fingerprint, backup=backup, rcon_save=save_response, edit=edit,
@@ -192,8 +203,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="无人时一次性应用 14 箱道具计划")
     parser.add_argument("--preflight", action="store_true", help="只读检查，不修改服务器")
     parser.add_argument("--force-with-players", action="store_true", help="已获明确授权时允许有玩家在线仍停服")
+    parser.add_argument("--container-id", action="append", default=[], help="只更新指定容器，可重复传入")
     args = parser.parse_args()
-    payload = preflight() if args.preflight else run_once(force_with_players=args.force_with_players)
+    container_ids = set(args.container_id) or None
+    payload = preflight() if args.preflight else run_once(
+        force_with_players=args.force_with_players,
+        container_ids=container_ids,
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     if payload["status"] == "failed":
         raise SystemExit(1)

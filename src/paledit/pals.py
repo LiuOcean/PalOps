@@ -24,7 +24,7 @@ def get_pal(character_id: str) -> dict[str, object] | None:
     return load_pal_lookup().get(character_id.casefold())
 
 
-def search_pals(query: str = "", limit: int = 50) -> dict[str, object]:
+def search_pals(query: str = "", limit: int = 50, offset: int = 0) -> dict[str, object]:
     index = load_pal_index()
     normalized = query.strip().casefold()
     matches = []
@@ -34,12 +34,12 @@ def search_pals(query: str = "", limit: int = 50) -> dict[str, object]:
         if normalized and normalized not in character_id.casefold() and normalized not in name.casefold():
             continue
         matches.append(pal)
-        if len(matches) >= limit:
-            break
     return {
         "query": query,
         "total_pals": index["pal_count"],
         "localized_pals": index["localized_count"],
+        "match_count": len(matches),
+        "offset": offset,
         "source": index["source"],
-        "results": matches,
+        "results": matches[offset:offset + limit],
     }

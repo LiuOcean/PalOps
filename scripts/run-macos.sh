@@ -17,4 +17,4 @@ fi
 
 uv sync --extra dev
 open "http://127.0.0.1:18765"
-exec uv run paledit serve
+exec uv run paledit serve --host 0.0.0.0

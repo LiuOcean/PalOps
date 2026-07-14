@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -6,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .backups import delete_backup, list_backups, prepare_backup_restore, restore_backup
+from .chat import DEFAULT_CHAT_DB, sync_chat_history
 from .items import get_item, search_items
 from .map import get_map_config
 from .pals import search_pals
@@ -59,13 +61,21 @@ def item(item_id: str) -> dict[str, object]:
 
 
 @app.get("/api/pals")
-def pals(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
-    return search_pals(q, limit)
+def pals(
+    q: str = "",
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    return search_pals(q, limit, offset)
 
 
 @app.get("/api/skills")
-def skills(q: str = "", limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
-    return search_skills(q, limit)
+def skills(
+    q: str = "",
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    return search_skills(q, limit, offset)
 
 
 @app.get("/api/worlds")
@@ -162,6 +172,14 @@ def server_metrics() -> dict[str, int | float | None]:
         return get_server_metrics()
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/chat")
+def server_chat(limit: int = Query(default=300, ge=1, le=1000)) -> dict[str, object]:
+    try:
+        return sync_chat_history(DEFAULT_CHAT_DB, limit)
+    except (OSError, sqlite3.Error) as error:
+        raise HTTPException(status_code=500, detail=f"保存本地聊天记录失败：{error}") from error
 
 
 @app.post("/api/server/actions")

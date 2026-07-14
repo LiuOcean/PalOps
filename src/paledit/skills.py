@@ -42,7 +42,7 @@ def describe_skills(skill_ids: list[str]) -> list[dict[str, object]]:
     return result
 
 
-def search_skills(query: str = "", limit: int = 50) -> dict[str, object]:
+def search_skills(query: str = "", limit: int = 50, offset: int = 0) -> dict[str, object]:
     index = load_skill_index()
     normalized = query.strip().casefold()
     matches = []
@@ -53,11 +53,11 @@ def search_skills(query: str = "", limit: int = 50) -> dict[str, object]:
         if normalized and normalized not in searchable:
             continue
         matches.append(skill)
-        if len(matches) >= limit:
-            break
     return {
         "query": query,
         "total_skills": index["skill_count"],
+        "match_count": len(matches),
+        "offset": offset,
         "source": index["source"],
-        "results": matches,
+        "results": matches[offset:offset + limit],
     }

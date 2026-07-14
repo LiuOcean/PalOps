@@ -64,10 +64,13 @@ CAPTURE = (
     "TreasureBoxKey01", "TreasureBoxKey02", "TreasureBoxKey03",
 )
 TRAINING = (
-    "Rankup_Arbitrary", "PalUpgradeStone4", "ExpBoost_04", "AffectionFruit_01",
+    "Rankup_Arbitrary", "PalUpgradeStone4", "ExpBoost_04", "LvUP_01", "AffectionFruit_01",
     "Fruit_hp_01", "Fruit_attack_01", "Fruit__defense_01", "PalGenderReverse",
 )
 COMBAT_IMPLANTS = (
+    "PalPassiveSkillChange_Consumable_PAL_ALLAttack_up3",
+    "PalPassiveSkillChange_Consumable_Deffence_up3",
+    "PalPassiveSkillChange_Consumable_Legend",
     "PalPassiveSkillChange_Consumable_WorldTree_ATK_DEF",
     "PalPassiveSkillChange_Consumable_WorldTree_ATK",
     "PalPassiveSkillChange_Consumable_WorldTree_DEF",
@@ -82,6 +85,10 @@ COMBAT_IMPLANTS = (
     "PalPassiveSkillChange_Consumable_Rare",
 )
 WORK_IMPLANTS = (
+    "PalPassiveSkillChange_Consumable_CraftSpeed_up3",
+    "PalPassiveSkillChange_Consumable_MoveSpeed_up_3",
+    "PalPassiveSkillChange_Consumable_PAL_FullStomach_Down_3",
+    "PalPassiveSkillChange_Consumable_PAL_Sanity_Down_3",
     "PalPassiveSkillChange_Consumable_WorldTree_MoveSpeed",
     "PalPassiveSkillChange_Consumable_Stamina_Up_3",
     "PalPassiveSkillChange_Consumable_RideJumpCount_Increase2",

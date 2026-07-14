@@ -8,7 +8,7 @@ def test_box_plan_has_14_unique_boxes_and_fits_capacity() -> None:
     assert len({plan.label for plan in plans}) == 14
     assert all(plan.label.startswith("物资箱-") for plan in plans)
     assert all(0 < len(plan.items) <= 54 for plan in plans)
-    assert sum(len(plan.items) for plan in plans) == 370
+    assert sum(len(plan.items) for plan in plans) == 378
 
     by_label = {plan.label: dict(plan.items) for plan in plans}
     assert "WorldTreeOre" in by_label["物资箱-高级矿石"]

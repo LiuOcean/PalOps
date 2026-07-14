@@ -10,9 +10,11 @@ const itemCategories = document.querySelector('#item-categories');
 const palResults = document.querySelector('#pal-results');
 const palSummary = document.querySelector('#pal-summary');
 const palQuery = document.querySelector('#pal-query');
+const palMore = document.querySelector('#pal-more');
 const skillResults = document.querySelector('#skill-results');
 const skillSummary = document.querySelector('#skill-summary');
 const skillQuery = document.querySelector('#skill-query');
+const skillMore = document.querySelector('#skill-more');
 const userPanel = document.querySelector('#user-panel');
 const usersNode = document.querySelector('#users');
 const userSummary = document.querySelector('#user-summary');
@@ -58,6 +60,8 @@ let pendingBackupRestore = null;
 let pendingBackupDelete = null;
 let restartConfirmationToken = null;
 const SERVER_CONTEXT_REFRESH_MS = 15_000;
+const CHAT_REFRESH_MS = 5_000;
+const CHAT_BACKGROUND_REFRESH_MS = 30_000;
 const OWNER_PLAYER_UID = '00000000-0000-0000-0000-000000000000';
 const CATALOG_PAGE_SIZE = 100;
 const catalogStates = {
@@ -66,6 +70,8 @@ const catalogStates = {
   skills: {query:'', offset:0, matchCount:0, loading:false, requestId:0},
 };
 let serverContextRequest = null;
+let chatRequest = null;
+let chatData = null;
 const ROUTES = {
   overview: {page:'overview', root:'overview'},
   'world/search': {page:'saves', root:'world', resource:'search'},
@@ -75,6 +81,7 @@ const ROUTES = {
   'world/backups': {page:'backups', root:'world'},
   map: {page:'map', root:'map'},
   'manage/players': {page:'players', root:'manage'},
+  'manage/chat': {page:'chat', root:'manage'},
   'manage/rules': {page:'config', root:'manage'},
   'manage/operations': {page:'operations', root:'manage'},
   'catalog/items': {page:'data', root:'catalog', catalog:'items'},
@@ -121,6 +128,7 @@ function applyRoute(route = currentRoute()) {
   if (state.page === 'config' && !serverConfig) loadServerConfig();
   if (state.page === 'backups' && !backupData) loadBackups();
   if (state.page === 'map') loadWorldMap();
+  if (state.page === 'chat') void loadChat();
 }
 
 function showView(name) {
@@ -587,6 +595,82 @@ function loadServerContext({showLoading = true} = {}) {
 
 function refreshServerContextInBackground() {
   if (!document.hidden) void loadServerContext({showLoading: false});
+}
+
+function renderChat() {
+  const root = document.querySelector('#chat-messages');
+  const status = document.querySelector('#chat-status');
+  const storage = document.querySelector('#chat-storage');
+  if (!root || !chatData) return;
+  const keepAtBottom = root.scrollHeight - root.scrollTop - root.clientHeight < 80;
+  const query = document.querySelector('#chat-query').value.trim().toLocaleLowerCase('zh-CN');
+  const rows = (chatData.messages || []).filter(row => !query || `${row.player_name} ${row.message}`.toLocaleLowerCase('zh-CN').includes(query));
+  root.innerHTML = '';
+  if (!rows.length) {
+    const empty = document.createElement('div'); empty.className = 'empty';
+    empty.textContent = query ? '没有匹配的聊天记录' : '尚未保存聊天记录';
+    root.append(empty);
+  } else {
+    let previous = null;
+    for (const row of rows) {
+      const day = row.game_at.slice(0, 10);
+      if (previous?.day !== day) {
+        const separator = document.createElement('div'); separator.className = 'chat-day';
+        const date = new Date(`${day}T00:00:00`);
+        separator.textContent = date.toLocaleDateString('zh-CN', {month:'long', day:'numeric', weekday:'short'});
+        root.append(separator);
+      }
+      const grouped = previous?.day === day && previous?.player_name === row.player_name;
+      const article = document.createElement('article'); article.className = `chat-message${grouped ? ' grouped' : ''}`;
+      let hue = 0;
+      for (const character of Array.from(row.player_name)) hue = (hue * 31 + character.codePointAt(0)) % 360;
+      article.style.setProperty('--speaker-hue', String(hue));
+      const avatar = document.createElement('span'); avatar.className = 'chat-avatar';
+      avatar.textContent = Array.from(row.player_name || '?')[0] || '?';
+      const body = document.createElement('div'); body.className = 'chat-message-body';
+      const header = document.createElement('header');
+      const player = document.createElement('strong'); player.textContent = row.player_name;
+      const time = document.createElement('time'); time.dateTime = row.logged_at; time.textContent = row.game_at.slice(11, 16);
+      const message = document.createElement('p'); message.textContent = row.message;
+      header.append(player, time); body.append(header, message); article.append(avatar, body); root.append(article);
+      previous = {...row, day};
+    }
+    if (keepAtBottom) root.scrollTop = root.scrollHeight;
+  }
+  const syncState = chatData.warning ? `远端同步失败，正在显示本地记录：${chatData.warning}` : `已保存 ${chatData.stored_count.toLocaleString()} 条${chatData.imported ? ` · 本次新增 ${chatData.imported} 条` : ' · 已是最新'}`;
+  status.textContent = syncState;
+  status.classList.toggle('error', Boolean(chatData.warning));
+  document.querySelector('#chat-count').textContent = `${chatData.stored_count.toLocaleString()} 条已归档`;
+  storage.innerHTML = '<i class="ph ph-database" aria-hidden="true"></i> SQLite 本地归档';
+  storage.title = chatData.database_path;
+}
+
+function loadChat({showLoading = true} = {}) {
+  if (chatRequest) return chatRequest;
+  chatRequest = (async () => {
+    const status = document.querySelector('#chat-status');
+    if (showLoading && status) { status.textContent = '正在读取本地记录并同步服务器…'; status.classList.remove('error'); }
+    try {
+      const response = await fetch('/api/server/chat?limit=500');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || '聊天记录读取失败');
+      chatData = data;
+      renderChat();
+    } catch (error) {
+      if (status) { status.textContent = error.message; status.classList.add('error'); }
+    } finally {
+      chatRequest = null;
+    }
+  })();
+  return chatRequest;
+}
+
+function refreshChatInBackground() {
+  if (!document.hidden && currentRoute() === 'manage/chat') void loadChat({showLoading: false});
+}
+
+function persistChatInBackground() {
+  if (!document.hidden && currentRoute() !== 'manage/chat') void loadChat({showLoading: false});
 }
 
 function renderOnlinePlayers() {
@@ -1816,13 +1900,7 @@ function renderUser(user) {
   form.addEventListener('change', syncDirty);
   card.querySelector('.readonly-data').textContent = `生命值 ${user.hp} · 护盾 ${user.shield_hp} · 声音 ${user.voice_id} · 实例 ${user.instance_id}`;
   renderOwnedPals(card, user);
-  const inventoryBox = card.querySelector('.inventory-list');
-  for (const [category, slots] of Object.entries(user.inventories || {})) {
-    const group = document.createElement('div'); group.className = 'inventory-group';
-    const title = document.createElement('h4'); title.textContent = `${category} · ${slots.length} 个槽位`; group.append(title);
-    for (const slot of slots) group.append(renderInventorySlot(user, category, slot));
-    inventoryBox.append(group);
-  }
+  renderInventory(card, user);
   card.querySelectorAll('.detail-tabs button').forEach(button => button.addEventListener('click', () => {
     card.querySelectorAll('.detail-tabs button').forEach(node => {
       const active = node === button; node.classList.toggle('active', active); node.setAttribute('aria-selected', String(active));
@@ -1848,29 +1926,150 @@ function renderUser(user) {
   return card;
 }
 
+function inventorySlotOccupied(slot) {
+  return slot.item_id !== 'None' && Number(slot.count) > 0;
+}
+
+function inventorySearchText(category, slot) {
+  return [category, slot.name_zh, slot.item_id, slot.description, slot.count]
+    .filter(value => value !== undefined && value !== null)
+    .join(' ')
+    .toLocaleLowerCase('zh-CN');
+}
+
+function renderInventory(card, user) {
+  const inventoryBox = card.querySelector('.inventory-list');
+  const inventories = Object.entries(user.inventories || {});
+  const allSlots = inventories.flatMap(([, slots]) => slots);
+  const occupiedSlots = allSlots.filter(inventorySlotOccupied);
+  const totalItems = occupiedSlots.reduce((total, slot) => total + Number(slot.count || 0), 0);
+
+  const header = document.createElement('header'); header.className = 'inventory-overview';
+  const heading = document.createElement('div'); heading.className = 'inventory-heading';
+  heading.innerHTML = '<span class="inventory-heading-icon"><i class="ph ph-backpack" aria-hidden="true"></i></span><span><strong>角色背包</strong><small>浏览道具，展开卡片后可修改内部 ID 与数量</small></span>';
+  const stats = document.createElement('div'); stats.className = 'inventory-stats';
+  stats.innerHTML = `<span><strong>${occupiedSlots.length.toLocaleString()}</strong><small>已用槽位</small></span><span><strong>${totalItems.toLocaleString()}</strong><small>道具总量</small></span><span><strong>${inventories.length.toLocaleString()}</strong><small>背包分类</small></span>`;
+  header.append(heading, stats);
+
+  const toolbar = document.createElement('div'); toolbar.className = 'inventory-toolbar';
+  const search = document.createElement('label'); search.className = 'search inventory-search';
+  search.innerHTML = '<i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索背包道具</span>';
+  const searchInput = document.createElement('input'); searchInput.type = 'search'; searchInput.placeholder = '搜索道具名称、分类或内部 ID';
+  search.append(searchInput);
+  const emptyToggle = document.createElement('label'); emptyToggle.className = 'inventory-empty-toggle';
+  const emptyCheckbox = document.createElement('input'); emptyCheckbox.type = 'checkbox';
+  const emptyCopy = document.createElement('span'); emptyCopy.textContent = '显示空槽位';
+  emptyToggle.append(emptyCheckbox, emptyCopy);
+  const resultSummary = document.createElement('span'); resultSummary.className = 'inventory-result-summary';
+  toolbar.append(search, emptyToggle, resultSummary);
+
+  const groups = document.createElement('div'); groups.className = 'inventory-groups';
+  const groupRows = inventories.map(([category, slots]) => {
+    const group = document.createElement('section'); group.className = 'inventory-group';
+    const occupied = slots.filter(inventorySlotOccupied);
+    const groupHeader = document.createElement('header');
+    const groupTitle = document.createElement('div');
+    const title = document.createElement('h4'); title.textContent = category;
+    const subtitle = document.createElement('p'); subtitle.textContent = `${occupied.length} 个有效道具 · ${slots.length} 个已记录槽位`;
+    groupTitle.append(title, subtitle);
+    const badge = document.createElement('span'); badge.className = 'inventory-group-badge'; badge.textContent = `${occupied.length}/${slots.length}`;
+    groupHeader.append(groupTitle, badge);
+    const grid = document.createElement('div'); grid.className = 'inventory-grid';
+    const slotRows = slots.map(slot => {
+      const node = renderInventorySlot(user, category, slot);
+      grid.append(node);
+      return {node, slot, searchText:inventorySearchText(category, slot)};
+    });
+    group.append(groupHeader, grid);
+    groups.append(group);
+    return {group, slotRows};
+  });
+
+  const applyFilters = () => {
+    const query = searchInput.value.trim().toLocaleLowerCase('zh-CN');
+    const showEmpty = emptyCheckbox.checked;
+    let visibleCount = 0;
+    for (const {group, slotRows} of groupRows) {
+      let groupVisible = 0;
+      for (const row of slotRows) {
+        const visible = (showEmpty || inventorySlotOccupied(row.slot)) && (!query || row.searchText.includes(query));
+        row.node.classList.toggle('hidden', !visible);
+        if (visible) groupVisible += 1;
+      }
+      group.classList.toggle('hidden', groupVisible === 0);
+      visibleCount += groupVisible;
+    }
+    resultSummary.textContent = query || showEmpty
+      ? `显示 ${visibleCount} / ${allSlots.length}`
+      : `${occupiedSlots.length} 个道具`;
+    let emptyState = inventoryBox.querySelector('.inventory-filter-empty');
+    if (!emptyState) {
+      emptyState = document.createElement('div'); emptyState.className = 'inventory-filter-empty empty hidden';
+      emptyState.innerHTML = '<i class="ph ph-magnifying-glass" aria-hidden="true"></i><strong>没有匹配的背包道具</strong><span>换个名称、分类或内部 ID 试试</span>';
+      inventoryBox.append(emptyState);
+    }
+    emptyState.classList.toggle('hidden', visibleCount !== 0);
+  };
+  searchInput.addEventListener('input', applyFilters);
+  emptyCheckbox.addEventListener('change', applyFilters);
+  inventoryBox.append(header, toolbar, groups);
+  applyFilters();
+}
+
 function renderInventorySlot(user, category, slot) {
-  const row = document.createElement('div'); row.className = 'inventory-row';
-  const number = document.createElement('span'); number.className = 'slot-number'; number.textContent = `#${slot.slot_index}`;
-  const itemField = document.createElement('label'); itemField.className = 'item-field';
-  const itemName = document.createElement('span'); itemName.className = 'inventory-item-name';
-  const image = document.createElement('img'); image.className = 'mini-item-icon'; image.alt = ''; if (slot.icon_url) image.src = slot.icon_url; else image.classList.add('hidden');
-  const nameCopy = document.createElement('span'); nameCopy.textContent = slot.name_zh; nameCopy.title = slot.description;
-  itemName.append(image, nameCopy);
-  const item = document.createElement('input'); item.value = slot.item_id; item.title = '使用 Palworld 内部道具 ID';
-  itemField.append(itemName, item);
+  const occupied = inventorySlotOccupied(slot);
+  const row = document.createElement('article'); row.className = `inventory-card ${occupied ? 'occupied' : 'vacant'}`;
+  const preview = document.createElement('div'); preview.className = 'inventory-card-preview';
+  const iconWrap = document.createElement('div'); iconWrap.className = 'inventory-card-icon';
+  const image = document.createElement('img'); image.alt = ''; image.loading = 'lazy';
+  if (slot.icon_url && occupied) image.src = slot.icon_url; else image.classList.add('hidden');
+  image.addEventListener('error', () => image.classList.add('hidden'), {once:true});
+  const fallback = document.createElement('i'); fallback.className = occupied ? 'ph ph-package' : 'ph ph-plus'; fallback.setAttribute('aria-hidden', 'true');
+  iconWrap.append(image, fallback);
+  const copy = document.createElement('div'); copy.className = 'inventory-card-copy';
+  const name = document.createElement('strong'); name.textContent = occupied ? slot.name_zh : '空槽位'; name.title = slot.description || '';
+  const meta = document.createElement('span'); meta.textContent = `槽位 ${Number(slot.slot_index) + 1}`;
+  copy.append(name, meta);
+  const amount = document.createElement('strong'); amount.className = 'inventory-card-count'; amount.textContent = occupied ? `× ${Number(slot.count).toLocaleString()}` : '可用';
+  preview.append(iconWrap, copy, amount);
+
+  const editor = document.createElement('details'); editor.className = 'inventory-editor';
+  const editorSummary = document.createElement('summary'); editorSummary.innerHTML = '<span><i class="ph ph-pencil-simple" aria-hidden="true"></i> 编辑槽位</span><i class="ph ph-caret-down" aria-hidden="true"></i>';
+  const fields = document.createElement('div'); fields.className = 'inventory-editor-fields';
+  const itemField = document.createElement('label'); itemField.innerHTML = '<span>道具内部 ID</span>';
+  const item = document.createElement('input'); item.value = slot.item_id; item.spellcheck = false; item.placeholder = '例如 Potion_Extreme';
+  itemField.append(item);
+  const countField = document.createElement('label'); countField.innerHTML = '<span>数量</span>';
   const count = document.createElement('input'); count.type = 'number'; count.min = '0'; count.max = '999999'; count.value = slot.count;
-  const save = document.createElement('button'); save.textContent = '保存';
+  countField.append(count);
+  fields.append(itemField, countField);
+  const actions = document.createElement('div'); actions.className = 'inventory-editor-actions';
+  const status = document.createElement('span'); status.className = 'inventory-save-status'; status.textContent = '尚无变更';
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = '保存此槽位'; save.disabled = true;
+  actions.append(status, save);
+  editor.append(editorSummary, fields, actions);
+  const syncDirty = () => {
+    const changed = item.value !== String(slot.item_id) || Number(count.value) !== Number(slot.count);
+    row.classList.toggle('changed', changed);
+    save.disabled = !changed;
+    status.classList.remove('error');
+    status.textContent = changed ? '有未保存的修改' : '尚无变更';
+  };
+  item.addEventListener('input', syncDirty);
+  count.addEventListener('input', syncDirty);
   save.addEventListener('click', async () => {
-    save.disabled = true; save.textContent = '写入中';
+    save.disabled = true; save.textContent = '正在保存…'; status.classList.remove('error'); status.textContent = '正在备份并写入';
     try {
       const body = {category,slot_index:slot.slot_index,item_id:item.value,count:Number(count.value),expected_sha256:activeWorldHash};
       const response = await fetch(`/api/world/users/${user.player_uid}/inventory?path=${encodeURIComponent(activeWorld)}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail);
       activeWorldHash = data.level_sha256; backupData = null; await loadUsers();
-    } catch (error) { alert(error.message); }
-    finally { save.disabled = false; save.textContent = '保存'; }
+    } catch (error) {
+      status.textContent = error.message; status.classList.add('error');
+      save.disabled = false; save.textContent = '重试保存';
+    }
   });
-  row.append(number,itemField,count,save); return row;
+  row.append(preview, editor); return row;
 }
 
 document.querySelector('#refresh').addEventListener('click', scan);
@@ -2005,11 +2204,15 @@ itemCategories.addEventListener('change', event => {
   loadItems(itemQuery.value);
 });
 let palSearchTimer;
-async function loadPals(query = '') {
-  const response = await fetch(`/api/pals?q=${encodeURIComponent(query)}&limit=100`);
+async function loadPals(query = '', append = false) {
+  const state = catalogStates.pals;
+  const request = catalogRequest(state, query, append);
+  if (!request) return;
+  setCatalogMore(palMore, state, '帕鲁');
+  const response = await fetch(`/api/pals?q=${encodeURIComponent(state.query)}&limit=${CATALOG_PAGE_SIZE}&offset=${request.offset}`);
   const data = await response.json();
-  palSummary.textContent = `${data.total_pals.toLocaleString()} 个 CharacterID · ${data.localized_pals.toLocaleString()} 个中文名称 · 本地帕鲁图标`;
-  palResults.innerHTML = '';
+  if (request.requestId !== state.requestId) return;
+  if (!request.append) palResults.innerHTML = '';
   for (const pal of data.results) {
     const row = itemTemplate.content.firstElementChild.cloneNode(true);
     setCatalogImage(row, pal.icon_url, 'ph-paw-print');
@@ -2023,18 +2226,29 @@ async function loadPals(query = '') {
     row.addEventListener('click', () => navigator.clipboard.writeText(pal.character_id));
     palResults.append(row);
   }
+  state.offset += data.results.length;
+  state.matchCount = data.match_count;
+  state.loading = false;
+  const progress = state.query ? `匹配 ${data.match_count.toLocaleString()} 个 · ` : '';
+  palSummary.textContent = `${data.total_pals.toLocaleString()} 个 CharacterID · ${progress}已显示 ${state.offset.toLocaleString()} 个 · ${data.localized_pals.toLocaleString()} 个中文名称`;
+  setCatalogMore(palMore, state, '帕鲁');
   if (!data.results.length) palResults.innerHTML = '<div class="empty">没有匹配的 CharacterID</div>';
 }
 palQuery.addEventListener('input', () => {
   clearTimeout(palSearchTimer);
   palSearchTimer = setTimeout(() => loadPals(palQuery.value), 180);
 });
+palMore.addEventListener('click', () => loadPals(palQuery.value, true));
 let skillSearchTimer;
-async function loadSkills(query = '') {
-  const response = await fetch(`/api/skills?q=${encodeURIComponent(query)}&limit=100`);
+async function loadSkills(query = '', append = false) {
+  const state = catalogStates.skills;
+  const request = catalogRequest(state, query, append);
+  if (!request) return;
+  setCatalogMore(skillMore, state, '技能');
+  const response = await fetch(`/api/skills?q=${encodeURIComponent(state.query)}&limit=${CATALOG_PAGE_SIZE}&offset=${request.offset}`);
   const data = await response.json();
-  skillSummary.textContent = `${data.total_skills.toLocaleString()} 个被动技能 · 可搜索名称、效果与内部 ID`;
-  skillResults.innerHTML = '';
+  if (request.requestId !== state.requestId) return;
+  if (!request.append) skillResults.innerHTML = '';
   for (const skill of data.results) {
     const row = itemTemplate.content.firstElementChild.cloneNode(true);
     setCatalogImage(row, '', 'ph-sparkle');
@@ -2047,12 +2261,26 @@ async function loadSkills(query = '') {
     row.addEventListener('click', () => navigator.clipboard.writeText(skill.skill_id));
     skillResults.append(row);
   }
+  state.offset += data.results.length;
+  state.matchCount = data.match_count;
+  state.loading = false;
+  const progress = state.query ? `匹配 ${data.match_count.toLocaleString()} 个 · ` : '';
+  skillSummary.textContent = `${data.total_skills.toLocaleString()} 个被动技能 · ${progress}已显示 ${state.offset.toLocaleString()} 个`;
+  setCatalogMore(skillMore, state, '技能');
   if (!data.results.length) skillResults.innerHTML = '<div class="empty">没有匹配的被动技能</div>';
 }
 skillQuery.addEventListener('input', () => {
   clearTimeout(skillSearchTimer);
   skillSearchTimer = setTimeout(() => loadSkills(skillQuery.value), 180);
 });
+skillMore.addEventListener('click', () => loadSkills(skillQuery.value, true));
+[
+  [itemResults, () => loadItems(itemQuery.value, true)],
+  [palResults, () => loadPals(palQuery.value, true)],
+  [skillResults, () => loadSkills(skillQuery.value, true)],
+].forEach(([results, loadMore]) => results.addEventListener('scroll', () => {
+  if (results.scrollHeight - results.scrollTop - results.clientHeight < 160) loadMore();
+}));
 containerQuery.addEventListener('input', renderContainers);
 let worldSearchTimer;
 worldSearchQuery.addEventListener('input', () => {
@@ -2300,6 +2528,8 @@ document.querySelectorAll('[data-quick-action]').forEach(button => button.addEve
 }));
 
 syncAdvancedForm();
+document.querySelector('#refresh-chat').addEventListener('click', () => loadChat());
+document.querySelector('#chat-query').addEventListener('input', renderChat);
 window.addEventListener('hashchange', () => applyRoute());
 document.querySelector('#mobile-world-back').addEventListener('click', () => document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open'));
 if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
@@ -2309,5 +2539,9 @@ loadPals();
 loadSkills();
 loadBackups();
 loadServerContext();
+void loadChat({showLoading: false});
 window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
+window.setInterval(refreshChatInBackground, CHAT_REFRESH_MS);
+window.setInterval(persistChatInBackground, CHAT_BACKGROUND_REFRESH_MS);
 document.addEventListener('visibilitychange', refreshServerContextInBackground);
+document.addEventListener('visibilitychange', refreshChatInBackground);
