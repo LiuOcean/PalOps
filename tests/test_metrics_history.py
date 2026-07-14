@@ -20,32 +20,36 @@ def _metrics(fps: float = 60) -> dict[str, object]:
 
 
 def test_health_score_marks_offline_as_zero_and_penalizes_degradation() -> None:
-    assert calculate_health_score(online=False, health="unhealthy", latency_ms=None, server_fps=None, frame_time_ms=None) == 0
-    healthy = calculate_health_score(online=True, health="healthy", latency_ms=50, server_fps=60, frame_time_ms=16)
-    degraded = calculate_health_score(online=True, health="healthy", latency_ms=500, server_fps=25, frame_time_ms=40)
+    assert calculate_health_score(online=False, health="unhealthy", server_latency_ms=None, server_fps=None, frame_time_ms=None) == 0
+    healthy = calculate_health_score(online=True, health="healthy", server_latency_ms=50, server_fps=60, frame_time_ms=16)
+    degraded = calculate_health_score(online=True, health="healthy", server_latency_ms=500, server_fps=25, frame_time_ms=40)
     assert healthy == 100
     assert 0 < degraded < healthy
 
 
 def test_history_persists_samples_and_returns_summary(tmp_path: Path) -> None:
     database = tmp_path / "metrics.sqlite3"
-    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, now=1_000_000)
-    record_server_sample(database, status_provider=lambda: _status(False), metrics_provider=lambda: _metrics(30), now=1_000_060)
+    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, latency_provider=lambda: 12.5, now=1_000_000)
+    record_server_sample(database, status_provider=lambda: _status(False), metrics_provider=lambda: _metrics(30), latency_provider=lambda: 17.5, now=1_000_060)
 
     result = read_metrics_history(database, hours=1, now=1_000_120)
 
     assert result["sample_count"] == 2
+    assert result["range_start"] == 996_520
+    assert result["range_end"] == 1_000_120
     assert result["summary"]["availability_percent"] == 50.0
     assert result["summary"]["incident_count"] == 1
     assert result["latest"]["current_players"] == 2
+    assert result["latest"]["server_latency_ms"] == 17.5
+    assert result["summary"]["average_server_latency_ms"] == 15.0
     assert result["database_path"] == str(database.resolve())
 
 
 def test_history_prunes_samples_older_than_seven_days(tmp_path: Path) -> None:
     database = tmp_path / "metrics.sqlite3"
-    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, now=1)
+    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, latency_provider=lambda: 10, now=1)
     current = 8 * 24 * 60 * 60
-    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, now=current)
+    record_server_sample(database, status_provider=_status, metrics_provider=_metrics, latency_provider=lambda: 10, now=current)
 
     result = read_metrics_history(database, hours=168, now=current)
 
@@ -63,6 +67,7 @@ def test_history_degrades_health_when_rest_metrics_are_unavailable(tmp_path: Pat
         database,
         status_provider=_status,
         metrics_provider=unavailable_metrics,
+        latency_provider=lambda: 10,
         now=1_000_000,
     )
 

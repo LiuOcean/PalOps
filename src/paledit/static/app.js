@@ -75,6 +75,7 @@ let chatData = null;
 let serverHistory = null;
 let historyHours = 24;
 let historyRequest = null;
+let historyRequestHours = null;
 const ROUTES = {
   overview: {page:'overview', root:'overview'},
   'world/search': {page:'saves', root:'world', resource:'search'},
@@ -553,7 +554,29 @@ function healthTone(score) {
   return 'healthy';
 }
 
-function renderHistoryChart(canvasId, samples, key, {color = '#a8ff55', fill = '#a8ff5512', fixedMax = null} = {}) {
+function chartTooltip(canvas) {
+  const frame = canvas.parentElement;
+  let tooltip = frame.querySelector('.chart-tooltip');
+  if (tooltip) return tooltip;
+  tooltip = document.createElement('div');
+  tooltip.className = 'chart-tooltip';
+  tooltip.setAttribute('aria-hidden', 'true');
+  tooltip.append(document.createElement('small'), document.createElement('strong'));
+  frame.appendChild(tooltip);
+  return tooltip;
+}
+
+function chartAxisTime(timestamp, hours) {
+  const date = new Date(timestamp * 1000);
+  if (hours <= 1) return date.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false});
+  if (hours <= 24) return date.toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false});
+  return date.toLocaleDateString('zh-CN', {month:'2-digit', day:'2-digit'});
+}
+
+function renderHistoryChart(canvasId, samples, key, {
+  color = '#a8ff55', fill = '#a8ff5512', fixedMax = null, label = key, unit = '', digits = 0,
+  rangeStart = null, rangeEnd = null, rangeHours = 24,
+} = {}) {
   const canvas = document.querySelector(canvasId);
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
@@ -565,35 +588,73 @@ function renderHistoryChart(canvasId, samples, key, {color = '#a8ff55', fill = '
   context.scale(ratio, ratio);
   const width = rect.width; const height = rect.height;
   const pad = {top:12, right:12, bottom:22, left:38};
-  const points = samples.map((row, index) => ({x:index, value:Number(row[key])})).filter(point => Number.isFinite(point.value));
-  context.clearRect(0, 0, width, height);
-  context.strokeStyle = '#ffffff0d'; context.lineWidth = 1;
-  context.fillStyle = '#657269'; context.font = '8px ui-monospace, monospace';
-  for (let step = 0; step <= 3; step += 1) {
-    const y = pad.top + (height - pad.top - pad.bottom) * step / 3;
-    context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
-  }
-  if (points.length < 2) return;
+  const points = samples
+    .map((row, index) => ({sampleIndex:index, timestamp:Number(row.sampled_at), value:row[key] == null ? Number.NaN : Number(row[key])}))
+    .filter(point => Number.isFinite(point.timestamp) && Number.isFinite(point.value));
   const values = points.map(point => point.value);
-  const min = fixedMax === null ? Math.min(...values) : 0;
-  const max = fixedMax === null ? Math.max(...values) : fixedMax;
+  const min = fixedMax === null && values.length ? Math.min(...values) : 0;
+  const max = fixedMax === null && values.length ? Math.max(...values) : (fixedMax ?? 1);
   const spread = Math.max(max - min, 1);
-  const xAt = index => pad.left + index / Math.max(samples.length - 1, 1) * (width - pad.left - pad.right);
+  const firstTimestamp = Number(rangeStart) || Number(samples[0]?.sampled_at) || 0;
+  const lastTimestamp = Number(rangeEnd) || Number(samples[samples.length - 1]?.sampled_at) || firstTimestamp + 1;
+  const timeSpread = Math.max(lastTimestamp - firstTimestamp, 1);
+  const xAt = timestamp => pad.left + Math.max(0, Math.min((timestamp - firstTimestamp) / timeSpread, 1)) * (width - pad.left - pad.right);
   const yAt = value => pad.top + (1 - (value - min) / spread) * (height - pad.top - pad.bottom);
-  context.fillText(max.toFixed(0), 4, pad.top + 4);
-  context.fillText(min.toFixed(0), 4, height - pad.bottom + 3);
-  context.beginPath();
-  points.forEach((point, index) => { const x = xAt(point.x); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
-  const last = points[points.length - 1];
-  context.lineTo(xAt(last.x), height - pad.bottom); context.lineTo(xAt(points[0].x), height - pad.bottom); context.closePath();
-  context.fillStyle = fill; context.fill();
-  context.beginPath();
-  points.forEach((point, index) => { const x = xAt(point.x); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
-  context.strokeStyle = color; context.lineWidth = 1.7; context.lineJoin = 'round'; context.stroke();
-  context.fillStyle = '#657269';
-  const firstTime = new Date(samples[0].sampled_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false});
-  const lastTime = new Date(samples[samples.length - 1].sampled_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false});
-  context.fillText(firstTime, pad.left, height - 5); context.textAlign = 'right'; context.fillText(lastTime, width - pad.right, height - 5); context.textAlign = 'left';
+  const draw = (hoveredPoint = null) => {
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = '#ffffff0d'; context.lineWidth = 1;
+    context.fillStyle = '#657269'; context.font = '8px ui-monospace, monospace';
+    for (let step = 0; step <= 3; step += 1) {
+      const y = pad.top + (height - pad.top - pad.bottom) * step / 3;
+      context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
+    }
+    const firstTime = chartAxisTime(firstTimestamp, rangeHours);
+    const lastTime = chartAxisTime(lastTimestamp, rangeHours);
+    context.fillText(firstTime, pad.left, height - 5); context.textAlign = 'right'; context.fillText(lastTime, width - pad.right, height - 5); context.textAlign = 'left';
+    if (points.length < 2) return;
+    context.fillText(max.toFixed(0), 4, pad.top + 4); context.fillText(min.toFixed(0), 4, height - pad.bottom + 3);
+    context.beginPath();
+    points.forEach((point, index) => { const x = xAt(point.timestamp); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+    const last = points[points.length - 1];
+    context.lineTo(xAt(last.timestamp), height - pad.bottom); context.lineTo(xAt(points[0].timestamp), height - pad.bottom); context.closePath();
+    context.fillStyle = fill; context.fill();
+    context.beginPath();
+    points.forEach((point, index) => { const x = xAt(point.timestamp); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+    context.strokeStyle = color; context.lineWidth = 1.7; context.lineJoin = 'round'; context.stroke();
+    if (!hoveredPoint) return;
+    const hoverX = xAt(hoveredPoint.timestamp); const hoverY = yAt(hoveredPoint.value);
+    context.beginPath(); context.moveTo(hoverX, pad.top); context.lineTo(hoverX, height - pad.bottom);
+    context.strokeStyle = '#ffffff35'; context.lineWidth = 1; context.stroke();
+    context.beginPath(); context.arc(hoverX, hoverY, 4, 0, Math.PI * 2);
+    context.fillStyle = '#0d1712'; context.fill(); context.strokeStyle = color; context.lineWidth = 2; context.stroke();
+  };
+  draw();
+
+  const tooltip = chartTooltip(canvas);
+  tooltip.classList.remove('visible');
+  tooltip.setAttribute('aria-hidden', 'true');
+  canvas.onpointermove = event => {
+    if (points.length < 2) return;
+    const bounds = canvas.getBoundingClientRect();
+    const pointerX = Math.max(pad.left, Math.min(event.clientX - bounds.left, width - pad.right));
+    const targetTimestamp = firstTimestamp + (pointerX - pad.left) / (width - pad.left - pad.right) * timeSpread;
+    const point = points.reduce((nearest, candidate) => (
+      Math.abs(candidate.timestamp - targetTimestamp) < Math.abs(nearest.timestamp - targetTimestamp) ? candidate : nearest
+    ));
+    const sample = samples[point.sampleIndex];
+    draw(point);
+    tooltip.querySelector('small').textContent = new Date(sample.sampled_at * 1000).toLocaleString('zh-CN', {hour12:false});
+    tooltip.querySelector('strong').textContent = `${label} ${point.value.toFixed(digits)}${unit}`;
+    tooltip.style.left = `${Math.max(76, Math.min(xAt(point.timestamp), width - 76))}px`;
+    tooltip.style.top = `${Math.max(52, yAt(point.value))}px`;
+    tooltip.classList.add('visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  };
+  canvas.onpointerleave = () => {
+    draw();
+    tooltip.classList.remove('visible');
+    tooltip.setAttribute('aria-hidden', 'true');
+  };
 }
 
 function renderServerHistory() {
@@ -606,14 +667,14 @@ function renderServerHistory() {
   ring.style.setProperty('--health-score', Number.isFinite(score) ? score : 0);
   ring.dataset.tone = healthTone(score);
   document.querySelector('#health-score').textContent = Number.isFinite(score) ? score.toFixed(0) : '—';
-  document.querySelector('#health-latency').textContent = historyValue(latest.latency_ms, ' ms', 0);
+  document.querySelector('#health-latency').textContent = historyValue(latest.server_latency_ms, ' ms', 0);
   document.querySelector('#health-availability').textContent = historyValue(summary.availability_percent, '%', 1);
   document.querySelector('#health-incidents').textContent = Number.isFinite(summary.incident_count) ? String(summary.incident_count) : '—';
   document.querySelector('#health-sample-state').textContent = latest.error
     ? `指标采集异常 · ${latest.error}`
     : serverHistory.sample_count ? `${serverHistory.sample_count} 个样本 · ${historyHours === 168 ? '近 7 天' : `${historyHours} 小时`}` : '等待首个历史样本';
-  document.querySelector('#history-latency-current').textContent = historyValue(latest.latency_ms, ' ms', 0);
-  document.querySelector('#history-latency-summary').textContent = `平均 ${historyValue(summary.average_latency_ms, ' ms', 0)} · P95 ${historyValue(summary.p95_latency_ms, ' ms', 0)}`;
+  document.querySelector('#history-latency-current').textContent = historyValue(latest.server_latency_ms, ' ms', 0);
+  document.querySelector('#history-latency-summary').textContent = `平均 ${historyValue(summary.average_server_latency_ms, ' ms', 0)} · P95 ${historyValue(summary.p95_server_latency_ms, ' ms', 0)}`;
   document.querySelector('#history-fps-current').textContent = historyValue(latest.server_fps, '', 0);
   document.querySelector('#history-fps-summary').textContent = `平均 ${historyValue(summary.average_fps, '', 1)}`;
   document.querySelector('#history-health-current').textContent = Number.isFinite(score) ? score.toFixed(0) : '—';
@@ -621,29 +682,43 @@ function renderServerHistory() {
   document.querySelector('#history-sample-count').textContent = `${serverHistory.sample_count} 个样本`;
   document.querySelector('#history-updated').textContent = latest.sampled_at ? `最近采样 ${new Date(latest.sampled_at * 1000).toLocaleString('zh-CN', {hour12:false})}` : '等待历史数据';
   document.querySelector('#latency-chart-empty').classList.toggle('hidden', samples.length >= 2);
-  renderHistoryChart('#latency-chart', samples, 'latency_ms', {color:'#6ccfff', fill:'#6ccfff14'});
-  renderHistoryChart('#fps-chart', samples, 'server_fps', {color:'#a8ff55', fill:'#a8ff5512'});
-  renderHistoryChart('#health-chart', samples, 'health_score', {color:'#e8b75b', fill:'#e8b75b12', fixedMax:100});
-  renderHistoryChart('#players-chart', samples, 'current_players', {color:'#ba8cff', fill:'#ba8cff12'});
+  const rangeHours = Number(serverHistory.hours) || historyHours;
+  const rangeEnd = Number(serverHistory.range_end) || Math.floor(Date.now() / 1000);
+  const chartRange = {
+    rangeStart:Number(serverHistory.range_start) || rangeEnd - rangeHours * 60 * 60,
+    rangeEnd,
+    rangeHours,
+  };
+  renderHistoryChart('#latency-chart', samples, 'server_latency_ms', {...chartRange, color:'#6ccfff', fill:'#6ccfff14', label:'服务器延迟', unit:' ms', digits:1});
+  renderHistoryChart('#fps-chart', samples, 'server_fps', {...chartRange, color:'#a8ff55', fill:'#a8ff5512', label:'服务器 FPS', digits:1});
+  renderHistoryChart('#health-chart', samples, 'health_score', {...chartRange, color:'#e8b75b', fill:'#e8b75b12', fixedMax:100, label:'健康分', digits:0});
+  renderHistoryChart('#players-chart', samples, 'current_players', {...chartRange, color:'#ba8cff', fill:'#ba8cff12', label:'在线玩家', unit:' 人', digits:0});
 }
 
 async function loadServerHistory({showLoading = true} = {}) {
-  if (historyRequest) return historyRequest;
+  const requestedHours = historyHours;
+  if (historyRequest && historyRequestHours === requestedHours) return historyRequest;
   if (showLoading) document.querySelector('#history-updated').textContent = '正在读取本地历史…';
-  historyRequest = (async () => {
+  const request = (async () => {
     try {
-      const response = await fetch(`/api/server/history?hours=${historyHours}`);
+      const response = await fetch(`/api/server/history?hours=${requestedHours}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || '服务器历史读取失败');
+      if (historyHours !== requestedHours) return;
       serverHistory = data;
       renderServerHistory();
     } catch (error) {
-      document.querySelector('#history-updated').textContent = error.message;
+      if (historyHours === requestedHours) document.querySelector('#history-updated').textContent = error.message;
     } finally {
-      historyRequest = null;
+      if (historyRequest === request) {
+        historyRequest = null;
+        historyRequestHours = null;
+      }
     }
   })();
-  return historyRequest;
+  historyRequest = request;
+  historyRequestHours = requestedHours;
+  return request;
 }
 
 function loadServerContext({showLoading = true} = {}) {

@@ -8,6 +8,7 @@ import base64
 import hashlib
 import re
 import secrets
+import socket
 import time
 from datetime import datetime
 from itertools import combinations
@@ -22,6 +23,7 @@ REMOTE_SAVE_ROOT = "/srv/palworld/Pal/Saved"
 REMOTE_DOCKER = "/usr/local/bin/docker"
 SERVER_CONTAINER = "palworld-server"
 RCON_BIN = "/usr/bin/rcon-cli"
+RCON_PORT = 25575
 REMOTE_COMPOSE = "/srv/palworld/compose.yaml"
 _RESTART_TOKENS: dict[str, float] = {}
 _RESTART_TOKEN_TTL = 120
@@ -138,6 +140,37 @@ def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
         raise RuntimeError(f"palworld-server 操作失败：{detail}") from error
+
+
+def _remote_hostname() -> str:
+    """Resolve the real address behind the SSH alias without opening SSH."""
+    try:
+        result = subprocess.run(
+            ["ssh", "-G", REMOTE_HOST],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("无法解析 palworld-server 服务器地址") from error
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key.lower() == "hostname" and value.strip():
+            return value.strip()
+    raise RuntimeError("无法解析 palworld-server 服务器地址")
+
+
+def measure_server_latency() -> float:
+    """Measure a direct TCP round trip to the Palworld server process."""
+    hostname = _remote_hostname()
+    started = time.perf_counter()
+    try:
+        with socket.create_connection((hostname, RCON_PORT), timeout=3):
+            pass
+    except OSError as error:
+        raise RuntimeError("无法测量 palworld-server 服务器延迟") from error
+    return round((time.perf_counter() - started) * 1000, 1)
 
 
 def _rcon(command: str, timeout: int = 20) -> str:

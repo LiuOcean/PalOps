@@ -122,3 +122,5 @@ dialog:focus-visible{outline:2px solid var(--lime);outline-offset:4px}
 
 .app-view[data-page="data"] [data-catalog-pane="items"] .item-results{max-height:calc(100dvh - 340px)}
 @media(max-width:700px){.app-view[data-page="data"] [data-catalog-pane="items"] .item-results{max-height:none}}
+
+.mini-chart-frame{position:relative}.chart-frame canvas,.mini-chart-frame canvas{cursor:crosshair}.chart-tooltip{position:absolute;z-index:5;min-width:128px;display:grid;gap:4px;padding:8px 10px;transform:translate(-50%,calc(-100% - 10px));border:1px solid var(--line-strong);border-radius:7px;background:#08100ded;box-shadow:0 8px 24px #000b;opacity:0;pointer-events:none;transition:opacity .1s ease}.chart-tooltip.visible{opacity:1}.chart-tooltip small{color:#829087;font-size:8px;white-space:nowrap}.chart-tooltip strong{color:#eef3ef;font-size:10px;white-space:nowrap}

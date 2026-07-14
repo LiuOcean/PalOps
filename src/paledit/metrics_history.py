@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from statistics import fmean
 
-from .remote import get_server_metrics, get_server_status
+from .remote import get_server_metrics, get_server_status, measure_server_latency
 
 
 DEFAULT_METRICS_DB = Path.cwd() / ".paledit-data" / "metrics.sqlite3"
@@ -30,7 +30,7 @@ def _connect(path: Path) -> sqlite3.Connection:
             online INTEGER NOT NULL,
             health TEXT NOT NULL,
             health_score INTEGER NOT NULL,
-            latency_ms REAL,
+            server_latency_ms REAL,
             server_fps REAL,
             frame_time_ms REAL,
             current_players INTEGER,
@@ -44,6 +44,9 @@ def _connect(path: Path) -> sqlite3.Connection:
             ON server_metrics(sampled_at DESC);
         """
     )
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(server_metrics)")}
+    if "server_latency_ms" not in columns:
+        connection.execute("ALTER TABLE server_metrics ADD COLUMN server_latency_ms REAL")
     return connection
 
 
@@ -51,7 +54,7 @@ def calculate_health_score(
     *,
     online: bool,
     health: str,
-    latency_ms: float | None,
+    server_latency_ms: float | None,
     server_fps: float | None,
     frame_time_ms: float | None,
 ) -> int:
@@ -60,8 +63,8 @@ def calculate_health_score(
     score = 100.0
     if health not in {"healthy", "unknown", ""}:
         score -= 35
-    if latency_ms is not None:
-        score -= min(25, max(0, latency_ms - 150) / 34)
+    if server_latency_ms is not None:
+        score -= min(25, max(0, server_latency_ms - 150) / 34)
     if server_fps is not None and server_fps < 50:
         score -= min(25, (50 - server_fps) * 1.25)
     if frame_time_ms is not None and frame_time_ms > 20:
@@ -74,6 +77,7 @@ def record_server_sample(
     *,
     status_provider: Callable[[], dict[str, object]] = get_server_status,
     metrics_provider: Callable[[], dict[str, object]] = get_server_metrics,
+    latency_provider: Callable[[], float] = measure_server_latency,
     now: int | None = None,
 ) -> dict[str, object]:
     sampled_at = int(time.time()) if now is None else int(now)
@@ -86,11 +90,14 @@ def record_server_sample(
     except RuntimeError as error:
         errors.append(str(error))
 
-    latency_ms: float | None = None
-    started = time.perf_counter()
     try:
         metrics = metrics_provider()
-        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+    except RuntimeError as error:
+        errors.append(str(error))
+
+    server_latency_ms: float | None = None
+    try:
+        server_latency_ms = _number(latency_provider())
     except RuntimeError as error:
         errors.append(str(error))
 
@@ -101,7 +108,7 @@ def record_server_sample(
     health_score = calculate_health_score(
         online=online,
         health=health,
-        latency_ms=latency_ms,
+        server_latency_ms=server_latency_ms,
         server_fps=server_fps,
         frame_time_ms=frame_time_ms,
     )
@@ -112,7 +119,7 @@ def record_server_sample(
         "online": online,
         "health": health,
         "health_score": health_score,
-        "latency_ms": latency_ms,
+        "server_latency_ms": server_latency_ms,
         "server_fps": server_fps,
         "frame_time_ms": frame_time_ms,
         "current_players": _integer(metrics.get("current_players")),
@@ -126,11 +133,11 @@ def record_server_sample(
         connection.execute(
             """
             INSERT OR REPLACE INTO server_metrics(
-                sampled_at, online, health, health_score, latency_ms, server_fps,
+                sampled_at, online, health, health_score, server_latency_ms, server_fps,
                 frame_time_ms, current_players, max_players, uptime_seconds,
                 base_camps, world_days, error
             ) VALUES (
-                :sampled_at, :online, :health, :health_score, :latency_ms, :server_fps,
+                :sampled_at, :online, :health, :health_score, :server_latency_ms, :server_fps,
                 :frame_time_ms, :current_players, :max_players, :uptime_seconds,
                 :base_camps, :world_days, :error
             )
@@ -166,7 +173,7 @@ def read_metrics_history(
         ).fetchall()]
 
     points = _downsample(rows, max_points)
-    latencies = [float(row["latency_ms"]) for row in rows if row["latency_ms"] is not None]
+    latencies = [float(row["server_latency_ms"]) for row in rows if row["server_latency_ms"] is not None]
     fps_values = [float(row["server_fps"]) for row in rows if row["server_fps"] is not None]
     availability = (sum(1 for row in rows if row["online"]) / len(rows) * 100) if rows else None
     incidents = sum(
@@ -176,6 +183,8 @@ def read_metrics_history(
     latest = rows[-1] if rows else None
     return {
         "hours": hours,
+        "range_start": since,
+        "range_end": current_time,
         "retention_days": RETENTION_SECONDS // 86400,
         "sample_interval_seconds": SAMPLE_INTERVAL_SECONDS,
         "sample_count": len(rows),
@@ -183,8 +192,8 @@ def read_metrics_history(
         "latest": latest,
         "summary": {
             "availability_percent": _rounded(availability),
-            "average_latency_ms": _rounded(fmean(latencies) if latencies else None),
-            "p95_latency_ms": _rounded(_percentile(latencies, 0.95)),
+            "average_server_latency_ms": _rounded(fmean(latencies) if latencies else None),
+            "p95_server_latency_ms": _rounded(_percentile(latencies, 0.95)),
             "average_fps": _rounded(fmean(fps_values) if fps_values else None),
             "incident_count": incidents,
         },
@@ -198,7 +207,7 @@ def _downsample(rows: list[dict[str, object]], max_points: int) -> list[dict[str
     bucket_size = math.ceil(len(rows) / max_points)
     result: list[dict[str, object]] = []
     numeric_keys = (
-        "health_score", "latency_ms", "server_fps", "frame_time_ms",
+        "health_score", "server_latency_ms", "server_fps", "frame_time_ms",
         "current_players", "max_players", "uptime_seconds", "base_camps", "world_days",
     )
     for offset in range(0, len(rows), bucket_size):
