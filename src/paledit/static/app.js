@@ -171,10 +171,10 @@ function normalizedSettingValue(value) {
 }
 
 function targetHost() {
-  return appSettings?.settings?.ssh_host || 'palworld-server';
+  return appSettings?.settings?.connection_method === 'direct' ? '本机 Docker' : (appSettings?.settings?.ssh_host || 'palworld-server');
 }
 
-function updateTargetHostLabels(host) {
+function updateTargetHostLabels(host, method = 'ssh') {
   document.querySelectorAll('[data-target-host]').forEach(node => { node.textContent = host; });
   const source = document.querySelector('.freshness span');
   const worldSource = document.querySelector('.source-status strong');
@@ -183,9 +183,48 @@ function updateTargetHostLabels(host) {
   const connectionCopy = document.querySelector('.server-context .aside-copy');
   if (source) source.innerHTML = `<i class="ph ph-circle" aria-hidden="true"></i> 数据来源：${host}`;
   if (worldSource) worldSource.textContent = `${host} 世界数据`;
-  if (localNote) localNote.innerHTML = `<i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalEdit`;
+  if (localNote) localNote.innerHTML = method === 'direct'
+    ? `<i class="ph ph-hard-drives" aria-hidden="true"></i> Docker 直连 · 源文件由容器挂载`
+    : `<i class="ph ph-lock-key" aria-hidden="true"></i> SSH 连接 · 凭据不写入 PalEdit`;
   if (overviewEyebrow) overviewEyebrow.textContent = `${host} OBSERVABILITY`;
-  if (connectionCopy) connectionCopy.textContent = `管理凭据保留在 ${host} 容器内。`;
+  if (connectionCopy) connectionCopy.textContent = method === 'direct'
+    ? '通过挂载的 Docker socket 访问服务器容器。'
+    : `管理凭据保留在 ${host} 容器内。`;
+}
+
+function renderConnectionMethod() {
+  const method = document.querySelector('#setting-connection-method')?.value || 'ssh';
+  const direct = method === 'direct';
+  document.querySelector('#setting-ssh-host-label')?.classList.toggle('hidden', direct);
+  document.querySelector('#setting-connection-help').textContent = direct
+    ? 'PalEdit 与游戏服务器部署在同一宿主机，通过挂载路径和 Docker socket 直接访问。'
+    : 'SSH 模式适合在 macOS 上独立运行 PalEdit。';
+  document.querySelector('#setting-save-root-label').textContent = direct ? '容器内存档挂载目录' : '远端存档目录';
+  document.querySelector('#setting-save-root-help').textContent = direct
+    ? '挂载到 PalEdit 容器内的 Pal/Saved 绝对路径。'
+    : 'Palworld 宿主机上的 Pal/Saved 绝对路径。';
+  document.querySelector('#setting-compose-label').textContent = direct ? '容器内 Compose 挂载文件' : 'Compose 文件';
+  document.querySelector('#setting-compose-help').textContent = direct
+    ? '挂载到 PalEdit 容器内的 Compose 文件，保持可写以使配置保存生效。'
+    : '包含 palworld-server 服务的 Compose 绝对路径。';
+}
+
+function applyConnectionMethodDefaults() {
+  const direct = document.querySelector('#setting-connection-method').value === 'direct';
+  const saveRoot = document.querySelector('#setting-remote-save-root');
+  const composePath = document.querySelector('#setting-remote-compose');
+  const dockerPath = document.querySelector('#setting-docker-path');
+  const sshDefaults = {
+    saveRoot:'/srv/palworld/Pal/Saved',
+    composePath:'/srv/palworld/compose.yaml',
+    dockerPath:'/usr/local/bin/docker',
+  };
+  const directDefaults = {...sshDefaults, dockerPath:'/usr/bin/docker'};
+  const from = direct ? sshDefaults : directDefaults;
+  const to = direct ? directDefaults : sshDefaults;
+  if (saveRoot.value === from.saveRoot) saveRoot.value = to.saveRoot;
+  if (composePath.value === from.composePath) composePath.value = to.composePath;
+  if (dockerPath.value === from.dockerPath) dockerPath.value = to.dockerPath;
 }
 
 function syncOwnerOptions() {
@@ -241,7 +280,7 @@ function scheduleBackgroundRefresh() {
 function applyAppSettings(payload) {
   appSettings = payload;
   OWNER_PLAYER_UID = String(payload.settings.owner_player_uid).toLowerCase();
-  updateTargetHostLabels(payload.settings.ssh_host);
+  updateTargetHostLabels(targetHost(), payload.settings.connection_method);
   scheduleBackgroundRefresh();
 }
 
@@ -257,6 +296,7 @@ function renderAppSettings() {
     '#setting-rcon-path':'rcon_path', '#setting-rcon-port':'rcon_port',
   };
   for (const [selector, key] of Object.entries(fields)) document.querySelector(selector).value = settings[key];
+  renderConnectionMethod();
   document.querySelector('#settings-storage-path').textContent = appSettings.storage_path;
   document.querySelector('#settings-note').textContent = appSettings.note;
   document.querySelector('#save-app-settings').disabled = true;
@@ -2869,6 +2909,11 @@ document.querySelector('#export-config').addEventListener('click', exportServerC
 document.querySelector('#reload-app-settings').addEventListener('click', () => loadAppSettings());
 document.querySelector('#app-settings-form').addEventListener('input', syncAppSettingsDirty);
 document.querySelector('#app-settings-form').addEventListener('change', syncAppSettingsDirty);
+document.querySelector('#setting-connection-method').addEventListener('change', () => {
+  applyConnectionMethodDefaults();
+  renderConnectionMethod();
+  syncAppSettingsDirty();
+});
 document.querySelector('#app-settings-form').addEventListener('submit', saveAppSettings);
 document.querySelector('#test-app-connection').addEventListener('click', testAppConnection);
 

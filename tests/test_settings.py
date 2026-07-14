@@ -37,6 +37,25 @@ def test_settings_are_validated_and_written_atomically(tmp_path: Path) -> None:
     assert list(path.parent.glob(".settings.*.json")) == []
 
 
+def test_settings_accept_docker_direct_connection(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    initial = settings_payload(path)
+
+    result = save_settings(
+        {
+            "connection_method": "direct",
+            "remote_save_root": "/srv/palworld/Pal/Saved",
+            "remote_compose_path": "/srv/palworld/compose.yaml",
+            "docker_path": "/usr/bin/docker",
+        },
+        str(initial["revision"]),
+        path,
+    )
+
+    assert result["settings"]["connection_method"] == "direct"
+    assert load_settings(path).remote_save_root == "/srv/palworld/Pal/Saved"
+
+
 def test_settings_reject_stale_revision_without_writing(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
 
@@ -54,7 +73,7 @@ def test_settings_reject_stale_revision_without_writing(tmp_path: Path) -> None:
         ({"ssh_host": "bad host"}, "SSH 主机"),
         ({"remote_save_root": "relative/path"}, "绝对路径"),
         ({"rcon_port": 70000}, "1–65535"),
-        ({"connection_method": "http"}, "仅支持 SSH"),
+        ({"connection_method": "http"}, "SSH 或 Docker 直连"),
     ],
 )
 def test_settings_reject_invalid_values(tmp_path: Path, updates: dict[str, object], message: str) -> None:

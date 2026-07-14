@@ -1,0 +1,12 @@
+.git
+.venv
+.pytest_cache
+.artifacts
+.paledit-backups
+.paledit-data
+Save
+dist
+build
+__pycache__
+*.pyc
+.DS_Store

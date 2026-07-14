@@ -71,8 +71,9 @@ def _validated(payload: dict[str, object]) -> AppSettings:
         raise ValueError("SSH 主机必须是安全的主机名或 SSH 别名")
     if not _SAFE_NAME.fullmatch(container_name):
         raise ValueError("容器名称格式无效")
-    if str(merged["connection_method"]) != "ssh":
-        raise ValueError("当前仅支持 SSH 连接方式")
+    connection_method = str(merged["connection_method"]).strip()
+    if connection_method not in {"ssh", "direct"}:
+        raise ValueError("连接方式必须是 SSH 或 Docker 直连")
 
     try:
         rcon_port = int(merged["rcon_port"])
@@ -85,7 +86,7 @@ def _validated(payload: dict[str, object]) -> AppSettings:
         owner_player_uid=owner_player_uid,
         status_refresh_seconds=interval("status_refresh_seconds", "状态刷新周期", 5, 300),
         chat_refresh_seconds=interval("chat_refresh_seconds", "聊天刷新周期", 2, 300),
-        connection_method="ssh",
+        connection_method=connection_method,
         ssh_host=ssh_host,
         remote_save_root=absolute_path("remote_save_root", "远端存档目录"),
         remote_compose_path=absolute_path("remote_compose_path", "Compose 路径"),

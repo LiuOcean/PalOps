@@ -126,27 +126,41 @@ _SETTING_OPTIONS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
-def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+def _connection_label() -> str:
     connection = load_settings()
-    remote_command = shlex.join(arguments)
+    return connection.ssh_host if connection.connection_method == "ssh" else "本机 Docker"
+
+
+def _ssh(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    """Run a host command over SSH or directly from a co-located container."""
+    connection = load_settings()
+    command = arguments
+    if connection.connection_method == "ssh":
+        remote_command = shlex.join(arguments)
+        command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", connection.ssh_host, remote_command]
+    label = _connection_label()
     try:
         return subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", connection.ssh_host, remote_command],
+            command,
             check=True,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"连接 {connection.ssh_host} 超时") from error
+        raise RuntimeError(f"连接 {label} 超时") from error
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
-        raise RuntimeError(f"{connection.ssh_host} 操作失败：{detail}") from error
+        raise RuntimeError(f"{label} 操作失败：{detail}") from error
+    except OSError as error:
+        raise RuntimeError(f"{label} 操作失败：{error}") from error
 
 
 def _remote_hostname() -> str:
     """Resolve the real address behind the SSH alias without opening SSH."""
     connection = load_settings()
+    if connection.connection_method == "direct":
+        return "host.docker.internal"
     try:
         result = subprocess.run(
             ["ssh", "-G", connection.ssh_host],
@@ -173,7 +187,7 @@ def measure_server_latency() -> float:
         with socket.create_connection((hostname, connection.rcon_port), timeout=3):
             pass
     except OSError as error:
-        raise RuntimeError(f"无法测量 {connection.ssh_host} 服务器延迟") from error
+        raise RuntimeError(f"无法测量 {_connection_label()} 服务器延迟") from error
     return round((time.perf_counter() - started) * 1000, 1)
 
 
@@ -254,7 +268,8 @@ def get_server_config() -> dict[str, object]:
     text = _read_compose()
     settings, _, _ = _compose_environment(text)
     return {
-        "host": connection.ssh_host,
+        "host": _connection_label(),
+        "connection_method": connection.connection_method,
         "path": connection.remote_compose_path,
         "revision": hashlib.sha256(text.encode()).hexdigest(),
         "settings": [
@@ -357,10 +372,11 @@ def get_server_status() -> dict[str, object]:
     ])
     values = result.stdout.strip().split("|", 3)
     if len(values) != 4:
-        raise RuntimeError(f"无法解析 {connection.ssh_host} 容器状态")
+        raise RuntimeError(f"无法解析 {_connection_label()} 容器状态")
     state, health, started_at, restart_policy = values
     return {
-        "host": connection.ssh_host,
+        "host": _connection_label(),
+        "connection_method": connection.connection_method,
         "container": connection.container_name,
         "state": state,
         "health": health or "unknown",
@@ -413,7 +429,7 @@ def list_online_players() -> list[dict[str, object]]:
             "location_y": _finite_float(player.get("location_y")),
         } for player in raw_players if isinstance(player, dict) and player.get("userId")]
     except (AttributeError, TypeError, ValueError) as error:
-        raise RuntimeError(f"无法解析 {connection.ssh_host} 在线玩家列表") from error
+        raise RuntimeError(f"无法解析 {_connection_label()} 在线玩家列表") from error
 
 
 def get_server_metrics() -> dict[str, int | float | None]:
@@ -442,7 +458,7 @@ def get_server_metrics() -> dict[str, int | float | None]:
             "world_days": integer("days"),
         }
     except (TypeError, ValueError) as error:
-        raise RuntimeError("无法解析 palworld-server 服务器指标") from error
+        raise RuntimeError(f"无法解析 {_connection_label()} 服务器指标") from error
 
 
 def run_server_action(
@@ -500,16 +516,22 @@ def pull_latest_save(destination: Path) -> dict[str, object]:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir()
     try:
-        subprocess.run(
-            [
-                "rsync", "-a", "--delete",
-                "--exclude", "backup/",
-                "--exclude", "PalEdit-Backup/",
-                "--exclude", "PalEdit-Remote-Backup/",
+        command = [
+            "rsync", "-a", "--delete",
+            "--exclude", "backup/",
+            "--exclude", "PalEdit-Backup/",
+            "--exclude", "PalEdit-Remote-Backup/",
+        ]
+        if connection.connection_method == "ssh":
+            command.extend([
                 "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10",
                 f"{connection.ssh_host}:{connection.remote_save_root}/SaveGames/",
-                str(staging / "SaveGames") + "/",
-            ],
+            ])
+        else:
+            command.append(f"{connection.remote_save_root}/SaveGames/")
+        command.append(str(staging / "SaveGames") + "/")
+        subprocess.run(
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -530,15 +552,22 @@ def pull_latest_save(destination: Path) -> dict[str, object]:
                 backup.rename(destination)
             raise
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"从 {connection.ssh_host} 拉取存档超时，已保留当前本地存档") from error
+        raise RuntimeError(f"从 {_connection_label()} 拉取存档超时，已保留当前本地存档") from error
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
-        raise RuntimeError(f"从 {connection.ssh_host} 拉取失败：{detail}") from error
+        raise RuntimeError(f"从 {_connection_label()} 拉取失败：{detail}") from error
+    except OSError as error:
+        raise RuntimeError(f"从 {_connection_label()} 拉取失败：{error}") from error
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
     return {
-        "source": f"{connection.ssh_host}:{connection.remote_save_root}/SaveGames",
+        "source": (
+            f"{connection.ssh_host}:{connection.remote_save_root}/SaveGames"
+            if connection.connection_method == "ssh"
+            else f"{connection.remote_save_root}/SaveGames"
+        ),
+        "connection_method": connection.connection_method,
         "destination": str(destination),
         "world_count": len(worlds),
         "backup_path": str(backup) if replaced else None,

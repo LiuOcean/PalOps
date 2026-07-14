@@ -1,0 +1,21 @@
+services:
+  paledit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paledit
+    restart: unless-stopped
+    ports:
+      - "${PALEDIT_BIND_ADDRESS:-127.0.0.1}:18765:18765"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - paledit-data:/app/.paledit-data
+      - paledit-save-cache:/app/Save
+      - "${PALWORLD_SERVICE_ROOT:-/srv/palworld}:${PALWORLD_SERVICE_ROOT:-/srv/palworld}"
+      - "${PALWORLD_SAVE_ROOT:-/srv/palworld/Pal/Saved}:${PALWORLD_SAVE_ROOT:-/srv/palworld/Pal/Saved}:ro"
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  paledit-data:
+  paledit-save-cache:

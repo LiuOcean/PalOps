@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from paledit.remote import (
-    _compose_environment, _parse_players, get_server_config, get_server_metrics, list_online_players, prepare_server_restart,
+    _compose_environment, _parse_players, _ssh, get_server_config, get_server_metrics, list_online_players, prepare_server_restart,
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
+from paledit.settings import AppSettings
 
 
 COMPOSE = '''services:
@@ -26,6 +27,25 @@ COMPOSE = '''services:
     environment:
       SERVER_NAME: "not-this-one"
 '''
+
+
+def test_direct_connection_runs_host_commands_without_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+    settings = AppSettings(connection_method="direct", docker_path="/usr/bin/docker")
+    monkeypatch.setattr("paledit.remote.load_settings", lambda: settings)
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0, stdout="running", stderr="")
+
+    monkeypatch.setattr("paledit.remote.subprocess.run", fake_run)
+
+    result = _ssh(["/usr/bin/docker", "inspect", "palworld-server"])
+
+    assert captured["command"] == ["/usr/bin/docker", "inspect", "palworld-server"]
+    assert captured["kwargs"]["timeout"] == 20
+    assert result.stdout == "running"
 
 
 def test_pull_latest_save_replaces_only_after_valid_download(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -69,6 +89,29 @@ def test_pull_latest_save_excludes_rotating_backup_directories(tmp_path: Path, m
     command = captured[0]
     excluded = [command[index + 1] for index, value in enumerate(command) if value == "--exclude"]
     assert excluded == ["backup/", "PalEdit-Backup/", "PalEdit-Remote-Backup/"]
+
+
+def test_pull_latest_save_uses_mounted_source_in_direct_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    captured = []
+    settings = AppSettings(connection_method="direct", remote_save_root="/server/palworld-saved")
+    monkeypatch.setattr("paledit.remote.load_settings", lambda: settings)
+
+    def fake_run(command, **kwargs):
+        captured.append(command)
+        target = Path(command[-1]) / "0" / "WORLD"
+        target.mkdir(parents=True)
+        (target / "Level.sav").write_bytes(b"valid enough for mocked discovery")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("paledit.remote.subprocess.run", fake_run)
+    monkeypatch.setattr("paledit.remote.discover_worlds", lambda root: [object()])
+
+    result = pull_latest_save(tmp_path / "Save")
+
+    assert "-e" not in captured[0]
+    assert captured[0][-2] == "/server/palworld-saved/SaveGames/"
+    assert result["source"] == "/server/palworld-saved/SaveGames"
+    assert result["connection_method"] == "direct"
 
 
 def test_pull_latest_save_keeps_current_data_when_download_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

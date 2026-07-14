@@ -7,7 +7,7 @@
 - 使用 Palworld 1.0 实档完成兼容性诊断；
 - 只读加载 `CharacterSaveParameterMap`，避开当前已知不兼容的 1.0 地图对象解析器；
 - 浏览器本地界面，不上传存档；
-- 可从 SSH 主机 `palworld-server` 拉取最新 `SaveGames` 数据；下载会先进入临时目录并通过存档发现校验，再替换本地 `Save`，原数据保存在 `.paledit-backups`；
+- 支持 SSH 和 Docker Compose 直连两种访问方式；可从 SSH 主机或容器挂载的源目录拉取最新 `SaveGames` 数据，数据会先进入临时目录并通过存档发现校验，再替换本地 `Save`，原数据保存在 `.paledit-backups`；
 - 提供备份索引、本地安全恢复和受控删除，统一汇总服务器同步前快照、PalEdit 写入前备份、游戏自动备份与批量箱子编辑备份；恢复前会校验哈希、再次备份当前世界并原子替换，删除会校验扫描时间与大小，恢复前安全快照创建后 24 小时内禁止删除，所有操作均不会修改远端 palworld-server；
 - 提供 palworld-server 服务状态、在线玩家与白名单 RCON 运维工具，支持保存、广播、踢出、封禁、计划关服和安全重启；
 - 提供服务器聊天查看与本地持久化：首次回收 Docker 仍保留的最近 7 天日志，之后在聊天页每 5 秒、其他页面每 30 秒按时间戳增量同步到 `.paledit-data/chat.sqlite3`，远端不可用时仍可浏览已保存记录；
@@ -41,6 +41,30 @@
 ```bash
 uv run paledit inspect Save/SaveGames/0/00000000000000000000000000000000
 ```
+
+## Docker Compose 直连部署
+
+`compose.direct.yaml` 会把 Palworld 的 `Pal/Saved` 目录、服务器 Compose 所在目录和 Docker socket 挂载到 PalEdit。在 Palworld 宿主机上的本仓库目录执行：
+
+```bash
+docker compose -f compose.direct.yaml up -d --build
+```
+
+默认使用 palworld-server 的当前路径；其他部署可通过 `PALWORLD_SAVE_ROOT` 和 `PALWORLD_SERVICE_ROOT` 覆盖宿主机路径。目录挂载使 Compose 配置仍能通过备份加原子替换保存。界面默认只绑定 `127.0.0.1:18765`，可通过 SSH 端口转发访问：
+
+```bash
+ssh -L 18765:127.0.0.1:18765 palworld-server
+```
+
+首次打开设置后，把连接方式切换为“Docker Compose 直连”，界面会自动填入：
+
+- 存档挂载目录：`/srv/palworld/Pal/Saved`
+- Compose 挂载文件：`/srv/palworld/compose.yaml`
+- Docker 路径：`/usr/bin/docker`
+
+存档挂载保持只读；“从服务器同步”仍会先复制到 PalEdit 自己的持久化缓存并校验，不会把界面中的本地编辑直接写回运行中的游戏存档。Compose 文件保持可写，以继续支持原有的配置备份、原子保存和二次确认重启流程。
+
+Docker socket 等价于宿主机 Docker 管理权限；不要把 PalEdit 端口直接暴露到不可信网络。
 
 ## 安全边界
 
