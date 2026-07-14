@@ -72,6 +72,9 @@ const catalogStates = {
 let serverContextRequest = null;
 let chatRequest = null;
 let chatData = null;
+let serverHistory = null;
+let historyHours = 24;
+let historyRequest = null;
 const ROUTES = {
   overview: {page:'overview', root:'overview'},
   'world/search': {page:'saves', root:'world', resource:'search'},
@@ -540,6 +543,109 @@ function renderServerMetrics(metrics, error = '') {
   value('#metrics-updated', `官方 REST · ${new Date().toLocaleTimeString('zh-CN', {hour12:false})}`);
 }
 
+function historyValue(value, suffix = '', digits = 0) {
+  return Number.isFinite(value) ? `${Number(value).toFixed(digits)}${suffix}` : '—';
+}
+
+function healthTone(score) {
+  if (!Number.isFinite(score) || score < 45) return 'critical';
+  if (score < 75) return 'warning';
+  return 'healthy';
+}
+
+function renderHistoryChart(canvasId, samples, key, {color = '#a8ff55', fill = '#a8ff5512', fixedMax = null} = {}) {
+  const canvas = document.querySelector(canvasId);
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * ratio);
+  canvas.height = Math.round(rect.height * ratio);
+  const context = canvas.getContext('2d');
+  context.scale(ratio, ratio);
+  const width = rect.width; const height = rect.height;
+  const pad = {top:12, right:12, bottom:22, left:38};
+  const points = samples.map((row, index) => ({x:index, value:Number(row[key])})).filter(point => Number.isFinite(point.value));
+  context.clearRect(0, 0, width, height);
+  context.strokeStyle = '#ffffff0d'; context.lineWidth = 1;
+  context.fillStyle = '#657269'; context.font = '8px ui-monospace, monospace';
+  for (let step = 0; step <= 3; step += 1) {
+    const y = pad.top + (height - pad.top - pad.bottom) * step / 3;
+    context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
+  }
+  if (points.length < 2) return;
+  const values = points.map(point => point.value);
+  const min = fixedMax === null ? Math.min(...values) : 0;
+  const max = fixedMax === null ? Math.max(...values) : fixedMax;
+  const spread = Math.max(max - min, 1);
+  const xAt = index => pad.left + index / Math.max(samples.length - 1, 1) * (width - pad.left - pad.right);
+  const yAt = value => pad.top + (1 - (value - min) / spread) * (height - pad.top - pad.bottom);
+  context.fillText(max.toFixed(0), 4, pad.top + 4);
+  context.fillText(min.toFixed(0), 4, height - pad.bottom + 3);
+  context.beginPath();
+  points.forEach((point, index) => { const x = xAt(point.x); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+  const last = points[points.length - 1];
+  context.lineTo(xAt(last.x), height - pad.bottom); context.lineTo(xAt(points[0].x), height - pad.bottom); context.closePath();
+  context.fillStyle = fill; context.fill();
+  context.beginPath();
+  points.forEach((point, index) => { const x = xAt(point.x); const y = yAt(point.value); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+  context.strokeStyle = color; context.lineWidth = 1.7; context.lineJoin = 'round'; context.stroke();
+  context.fillStyle = '#657269';
+  const firstTime = new Date(samples[0].sampled_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false});
+  const lastTime = new Date(samples[samples.length - 1].sampled_at * 1000).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false});
+  context.fillText(firstTime, pad.left, height - 5); context.textAlign = 'right'; context.fillText(lastTime, width - pad.right, height - 5); context.textAlign = 'left';
+}
+
+function renderServerHistory() {
+  if (!serverHistory) return;
+  const samples = serverHistory.samples || [];
+  const latest = serverHistory.latest || {};
+  const summary = serverHistory.summary || {};
+  const score = Number(latest.health_score);
+  const ring = document.querySelector('#health-score-ring');
+  ring.style.setProperty('--health-score', Number.isFinite(score) ? score : 0);
+  ring.dataset.tone = healthTone(score);
+  document.querySelector('#health-score').textContent = Number.isFinite(score) ? score.toFixed(0) : '—';
+  document.querySelector('#health-latency').textContent = historyValue(latest.latency_ms, ' ms', 0);
+  document.querySelector('#health-availability').textContent = historyValue(summary.availability_percent, '%', 1);
+  document.querySelector('#health-incidents').textContent = Number.isFinite(summary.incident_count) ? String(summary.incident_count) : '—';
+  document.querySelector('#health-sample-state').textContent = latest.error
+    ? `指标采集异常 · ${latest.error}`
+    : serverHistory.sample_count ? `${serverHistory.sample_count} 个样本 · ${historyHours === 168 ? '近 7 天' : `${historyHours} 小时`}` : '等待首个历史样本';
+  document.querySelector('#history-latency-current').textContent = historyValue(latest.latency_ms, ' ms', 0);
+  document.querySelector('#history-latency-summary').textContent = `平均 ${historyValue(summary.average_latency_ms, ' ms', 0)} · P95 ${historyValue(summary.p95_latency_ms, ' ms', 0)}`;
+  document.querySelector('#history-fps-current').textContent = historyValue(latest.server_fps, '', 0);
+  document.querySelector('#history-fps-summary').textContent = `平均 ${historyValue(summary.average_fps, '', 1)}`;
+  document.querySelector('#history-health-current').textContent = Number.isFinite(score) ? score.toFixed(0) : '—';
+  document.querySelector('#history-players-current').textContent = historyValue(latest.current_players, ' 人', 0);
+  document.querySelector('#history-sample-count').textContent = `${serverHistory.sample_count} 个样本`;
+  document.querySelector('#history-updated').textContent = latest.sampled_at ? `最近采样 ${new Date(latest.sampled_at * 1000).toLocaleString('zh-CN', {hour12:false})}` : '等待历史数据';
+  document.querySelector('#latency-chart-empty').classList.toggle('hidden', samples.length >= 2);
+  renderHistoryChart('#latency-chart', samples, 'latency_ms', {color:'#6ccfff', fill:'#6ccfff14'});
+  renderHistoryChart('#fps-chart', samples, 'server_fps', {color:'#a8ff55', fill:'#a8ff5512'});
+  renderHistoryChart('#health-chart', samples, 'health_score', {color:'#e8b75b', fill:'#e8b75b12', fixedMax:100});
+  renderHistoryChart('#players-chart', samples, 'current_players', {color:'#ba8cff', fill:'#ba8cff12'});
+}
+
+async function loadServerHistory({showLoading = true} = {}) {
+  if (historyRequest) return historyRequest;
+  if (showLoading) document.querySelector('#history-updated').textContent = '正在读取本地历史…';
+  historyRequest = (async () => {
+    try {
+      const response = await fetch(`/api/server/history?hours=${historyHours}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || '服务器历史读取失败');
+      serverHistory = data;
+      renderServerHistory();
+    } catch (error) {
+      document.querySelector('#history-updated').textContent = error.message;
+    } finally {
+      historyRequest = null;
+    }
+  })();
+  return historyRequest;
+}
+
 function loadServerContext({showLoading = true} = {}) {
   if (serverContextRequest) return serverContextRequest;
   serverContextRequest = (async () => {
@@ -594,7 +700,10 @@ function loadServerContext({showLoading = true} = {}) {
 }
 
 function refreshServerContextInBackground() {
-  if (!document.hidden) void loadServerContext({showLoading: false});
+  if (!document.hidden) {
+    void loadServerContext({showLoading: false});
+    if (currentRoute() === 'overview') void loadServerHistory({showLoading: false});
+  }
 }
 
 function renderChat() {
@@ -2531,6 +2640,12 @@ syncAdvancedForm();
 document.querySelector('#refresh-chat').addEventListener('click', () => loadChat());
 document.querySelector('#chat-query').addEventListener('input', renderChat);
 window.addEventListener('hashchange', () => applyRoute());
+document.querySelectorAll('[data-history-hours]').forEach(button => button.addEventListener('click', () => {
+  historyHours = Number(button.dataset.historyHours);
+  document.querySelectorAll('[data-history-hours]').forEach(option => option.classList.toggle('active', option === button));
+  void loadServerHistory();
+}));
+window.addEventListener('resize', () => { if (serverHistory && currentRoute() === 'overview') renderServerHistory(); });
 document.querySelector('#mobile-world-back').addEventListener('click', () => document.querySelector('.world-workspace')?.classList.remove('mobile-detail-open'));
 if (!location.hash) location.hash = '#/world/containers'; else applyRoute();
 scan();
@@ -2539,6 +2654,7 @@ loadPals();
 loadSkills();
 loadBackups();
 loadServerContext();
+void loadServerHistory();
 void loadChat({showLoading: false});
 window.setInterval(refreshServerContextInBackground, SERVER_CONTEXT_REFRESH_MS);
 window.setInterval(refreshChatInBackground, CHAT_REFRESH_MS);

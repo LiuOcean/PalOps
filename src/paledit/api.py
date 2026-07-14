@@ -1,4 +1,8 @@
+import asyncio
+import contextlib
+import logging
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -10,6 +14,9 @@ from .backups import delete_backup, list_backups, prepare_backup_restore, restor
 from .chat import DEFAULT_CHAT_DB, sync_chat_history
 from .items import get_item, search_items
 from .map import get_map_config
+from .metrics_history import (
+    DEFAULT_METRICS_DB, SAMPLE_INTERVAL_SECONDS, read_metrics_history, record_server_sample,
+)
 from .pals import search_pals
 from .parser import PARSER_REVISION, invalidate_world_snapshot, load_character_data, parser_capabilities
 from .remote import (
@@ -28,7 +35,29 @@ STATIC_ROOT = PACKAGE_ROOT / "static"
 DEFAULT_SAVE_ROOT = Path.cwd() / "Save"
 DEFAULT_SYNC_BACKUP_ROOT = Path.cwd() / ".paledit-backups"
 
-app = FastAPI(title="PalEdit", version=__version__)
+LOGGER = logging.getLogger(__name__)
+
+
+async def _sample_server_history() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(record_server_sample, DEFAULT_METRICS_DB)
+        except (OSError, sqlite3.Error) as error:
+            LOGGER.warning("保存服务器历史指标失败：%s", error)
+        await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    sampler = asyncio.create_task(_sample_server_history())
+    try:
+        yield
+    finally:
+        sampler.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sampler
+
+app = FastAPI(title="PalEdit", version=__version__, lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=STATIC_ROOT), name="assets")
 
 
@@ -172,6 +201,14 @@ def server_metrics() -> dict[str, int | float | None]:
         return get_server_metrics()
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/api/server/history")
+def server_history(hours: int = Query(default=24, ge=1, le=168)) -> dict[str, object]:
+    try:
+        return read_metrics_history(DEFAULT_METRICS_DB, hours=hours)
+    except (OSError, sqlite3.Error) as error:
+        raise HTTPException(status_code=500, detail=f"读取本地服务器历史失败：{error}") from error
 
 
 @app.get("/api/server/chat")
