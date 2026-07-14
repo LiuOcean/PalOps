@@ -7,6 +7,7 @@ name = "palops"
 version = "0.1.0"
 description = "A safety-first Palworld 1.0 server operations and save management console"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
