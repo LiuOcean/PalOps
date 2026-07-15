@@ -390,13 +390,13 @@ function renderBackups() {
     const copy = document.createElement('span'); copy.className = 'backup-copy';
     const title = document.createElement('strong'); title.textContent = backup.name;
     const meta = document.createElement('small');
-    const worlds = backup.world_ids?.length ? backup.world_ids.join(', ') : '未识别世界';
+    const worlds = backup.is_archive ? '完整服务器存档' : (backup.world_ids?.length ? backup.world_ids.join(', ') : '未识别世界');
     meta.textContent = `${new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false})} · ${worlds}`;
     copy.append(title, meta);
     const sourceBadge = document.createElement('span'); sourceBadge.className = `backup-source ${backup.source}`; sourceBadge.textContent = backup.source_label;
     const stats = document.createElement('span'); stats.className = 'backup-row-stats';
     const size = document.createElement('strong'); size.textContent = formatBytes(backup.size_bytes);
-    const files = document.createElement('small'); files.textContent = `${backup.file_count.toLocaleString()} 个文件${backup.has_level_save ? ' · 含 Level.sav' : ''}${backup.protected ? ' · 24 小时保护中' : ''}`;
+    const files = document.createElement('small'); files.textContent = `${backup.is_archive ? '压缩归档' : `${backup.file_count.toLocaleString()} 个文件`}${backup.has_level_save ? ' · 含 Level.sav' : ''}${backup.protected ? ' · 24 小时保护中' : ''}`;
     stats.append(size, files);
     article.append(icon, copy, sourceBadge, stats);
     article.classList.toggle('active', backup.backup_id === selectedBackupId);
@@ -438,9 +438,9 @@ function renderBackupDetail(backup) {
   const facts = article.querySelector('dl');
   const values = [
     ['创建时间', new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false})],
-    ['占用空间', `${formatBytes(backup.size_bytes)} · ${backup.file_count.toLocaleString()} 个文件`],
-    ['世界', backup.world_ids?.join(', ') || '未识别世界'],
-    ['安全状态', backup.protected ? `保护至 ${new Date(backup.protected_until).toLocaleString('zh-CN', {hour12:false})}` : '可按确认链操作'],
+    ['占用空间', `${formatBytes(backup.size_bytes)} · ${backup.is_archive ? '压缩归档' : `${backup.file_count.toLocaleString()} 个文件`}`],
+    ['世界', backup.is_archive ? '完整服务器存档' : (backup.world_ids?.join(', ') || '未识别世界')],
+    ['安全状态', backup.is_archive ? '游戏自动备份归档 · 只读' : (backup.protected ? `保护至 ${new Date(backup.protected_until).toLocaleString('zh-CN', {hour12:false})}` : '只读查看')],
   ];
   for (const [label, value] of values) {
     const row = document.createElement('div'); const dt = document.createElement('dt'); const dd = document.createElement('dd');

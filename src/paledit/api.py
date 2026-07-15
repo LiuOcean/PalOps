@@ -24,7 +24,7 @@ from .remote import (
     pull_latest_save, restart_server, run_server_action, update_server_config,
 )
 from .save import InvalidSaveError, discover_worlds
-from .settings import save_settings, settings_payload
+from .settings import load_settings, save_settings, settings_payload
 from .skills import search_skills
 from .world import (
     list_guilds, list_storage_containers, list_users, search_world, update_inventory_slot, update_user,
@@ -37,6 +37,13 @@ DEFAULT_SAVE_ROOT = Path.cwd() / "Save"
 DEFAULT_SYNC_BACKUP_ROOT = Path.cwd() / ".paledit-backups"
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _game_backup_root() -> Path | None:
+    settings = load_settings()
+    if settings.connection_method != "direct":
+        return None
+    return Path(settings.remote_save_root).expanduser().parent.parent / "backups"
 
 
 async def _sample_server_history() -> None:
@@ -163,8 +170,8 @@ def pull_save() -> dict[str, object]:
 @app.get("/api/backups")
 def backups() -> dict[str, object]:
     try:
-        return list_backups(DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT)
-    except OSError as error:
+        return list_backups(DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT, _game_backup_root())
+    except (OSError, ValueError) as error:
         raise HTTPException(status_code=500, detail=f"读取本地备份失败：{error}") from error
 
 

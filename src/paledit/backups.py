@@ -45,7 +45,11 @@ def _directory_stats(root: Path) -> tuple[int, int, bool]:
 
 
 def _backup_row(path: Path, source: str, world_ids: list[str]) -> dict[str, object]:
-    size_bytes, file_count, has_level_save = _directory_stats(path)
+    is_archive = path.is_file()
+    if is_archive:
+        size_bytes, file_count, has_level_save = path.stat().st_size, 1, False
+    else:
+        size_bytes, file_count, has_level_save = _directory_stats(path)
     stat = path.stat()
     normalized_world_ids = sorted(set(world_ids))
     created_at = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
@@ -62,18 +66,24 @@ def _backup_row(path: Path, source: str, world_ids: list[str]) -> dict[str, obje
         "file_count": file_count,
         "world_ids": normalized_world_ids,
         "path": str(path.resolve()),
+        "is_archive": is_archive,
         "has_level_save": has_level_save,
         "is_restore_safety": is_restore_safety,
         "protected": protected,
         "protected_until": protected_until.isoformat() if protected_until else None,
-        "deletable": not protected,
+        "deletable": not protected and not is_archive,
     }
 
 
-def list_backups(save_root: Path, sync_backup_root: Path) -> dict[str, object]:
+def list_backups(
+    save_root: Path,
+    sync_backup_root: Path,
+    game_backup_root: Path | None = None,
+) -> dict[str, object]:
     """List fixed local backup roots without exposing restore or delete operations."""
     save_root = save_root.expanduser().resolve()
     sync_backup_root = sync_backup_root.expanduser().resolve()
+    game_backup_root = game_backup_root.expanduser().resolve() if game_backup_root is not None else None
     rows: list[dict[str, object]] = []
 
     if sync_backup_root.is_dir():
@@ -87,6 +97,17 @@ def list_backups(save_root: Path, sync_backup_root: Path) -> dict[str, object]:
                 else []
             )
             rows.append(_backup_row(snapshot, "sync", world_ids))
+
+    if game_backup_root is not None and game_backup_root.is_dir():
+        for archive in game_backup_root.iterdir():
+            if (
+                archive.name.startswith(".")
+                or archive.is_symlink()
+                or not archive.is_file()
+                or not archive.name.endswith((".tar.gz", ".tgz"))
+            ):
+                continue
+            rows.append(_backup_row(archive, "game", []))
 
     worlds_root = save_root / "SaveGames" / "0"
     if worlds_root.is_dir():

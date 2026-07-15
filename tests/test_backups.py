@@ -48,6 +48,35 @@ def test_list_backups_combines_fixed_read_only_sources(tmp_path: Path) -> None:
     assert result["total_size_bytes"] == len(b"sync") + len(b"editor") + len(b"game") + len(b"box-plan")
 
 
+def test_list_backups_includes_external_game_backup_archives(tmp_path: Path) -> None:
+    save_root = tmp_path / "Save"
+    _write_world(save_root, "WORLD")
+    game_backup_root = tmp_path / "server" / "backups"
+    game_backup_root.mkdir(parents=True)
+    archive = game_backup_root / "palworld-save-2026-07-15_04-00-02.tar.gz"
+    archive.write_bytes(b"compressed-save")
+    (game_backup_root / "notes.txt").write_text("not a backup")
+    directory = game_backup_root / "palworld-save-directory"
+    directory.mkdir()
+
+    result = list_backups(save_root, tmp_path / ".paledit-backups", game_backup_root)
+
+    assert result["count"] == 1
+    assert result["counts"]["game"] == 1
+    assert result["total_size_bytes"] == len(b"compressed-save")
+    backup = result["backups"][0]
+    assert backup["name"] == archive.name
+    assert backup["source"] == "game"
+    assert backup["source_label"] == "游戏自动备份"
+    assert backup["size_bytes"] == len(b"compressed-save")
+    assert backup["file_count"] == 1
+    assert backup["world_ids"] == []
+    assert backup["path"] == str(archive.resolve())
+    assert backup["is_archive"] is True
+    assert backup["has_level_save"] is False
+    assert backup["deletable"] is False
+
+
 def test_list_backups_ignores_symlinked_snapshot(tmp_path: Path) -> None:
     save_root = tmp_path / "Save"
     save_root.mkdir()
