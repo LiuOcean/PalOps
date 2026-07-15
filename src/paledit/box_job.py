@@ -28,6 +28,8 @@ from .world import list_storage_containers
 
 STATE_PATH = Path(__file__).resolve().parents[2] / ".artifacts" / "box-job-state.json"
 LOCK_PATH = STATE_PATH.with_suffix(".lock")
+MAINTENANCE_BACKUP_DAYS = 7
+MAINTENANCE_BACKUP_MINIMUM = 3
 
 
 def _target_paths() -> tuple[str, str, str, str]:
@@ -36,7 +38,7 @@ def _target_paths() -> tuple[str, str, str, str]:
         raise ValueError("必须通过 PALWORLD_WORLD_ID 配置 32 位世界 ID")
     connection = load_settings()
     remote_world = f"{connection.remote_save_root}/SaveGames/0/{world_id}"
-    backup_root = f"{connection.remote_save_root}/PalEdit-Remote-Backup"
+    backup_root = f"{connection.remote_maintenance_backup_root}/box-job"
     return connection.ssh_host, world_id, remote_world, backup_root
 
 
@@ -72,9 +74,61 @@ def _rsync_from_remote(destination: Path, remote_host: str, remote_world: str) -
     subprocess.run([
         "rsync", "-a", "--delete",
         "--exclude", "backup/", "--exclude", "PalEdit-Backup/",
+        "--exclude", "PalEdit-Remote-Backup/",
         "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10",
         f"{remote_host}:{remote_world}/", f"{destination}/",
     ], check=True, capture_output=True, text=True, timeout=180)
+
+
+def _create_remote_level_backup(remote_world: str, remote_backup_root: str, world_id: str) -> str:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup = f"{remote_backup_root}/{stamp}/{world_id}"
+    _ssh(["/bin/mkdir", "-p", backup])
+    _ssh(["/bin/cp", "-p", f"{remote_world}/Level.sav", f"{backup}/Level.sav"], timeout=180)
+    manifest_script = (
+        "import datetime,hashlib,json,os,sys,tempfile;"
+        "root,source=sys.argv[1:];target=os.path.join(root,'Level.sav');"
+        "digest=lambda p:hashlib.sha256(open(p,'rb').read()).hexdigest();"
+        "source_sha=digest(source);backup_sha=digest(target);"
+        "assert source_sha==backup_sha,'backup hash mismatch';"
+        "data={'version':1,'operation':'box-job','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),"
+        "'files':[{'path':'Level.sav','sha256':backup_sha,'size_bytes':os.path.getsize(target)}]};"
+        "fd,tmp=tempfile.mkstemp(prefix='.manifest.',dir=root);"
+        "f=os.fdopen(fd,'w');json.dump(data,f,separators=(',',':'));f.write('\\n');f.close();"
+        "os.replace(tmp,os.path.join(root,'manifest.json'))"
+    )
+    _ssh(["python3", "-c", manifest_script, backup, f"{remote_world}/Level.sav"], timeout=30)
+    return backup
+
+
+def _prune_remote_level_backups(
+    remote_backup_root: str,
+    *,
+    keep_days: int = MAINTENANCE_BACKUP_DAYS,
+    minimum: int = MAINTENANCE_BACKUP_MINIMUM,
+) -> dict[str, object]:
+    if not remote_backup_root.endswith("/palops-backups/box-job"):
+        raise ValueError("拒绝清理非 PalOps 箱子任务备份目录")
+    script = (
+        "import json,os,shutil,sys,time;"
+        "requested=sys.argv[1];"
+        "assert not os.path.islink(requested),'backup root is a symlink';"
+        "root=os.path.realpath(requested);"
+        "assert os.path.basename(root)=='box-job' and os.path.basename(os.path.dirname(root))=='palops-backups',"
+        "'unexpected backup root';"
+        "days=int(sys.argv[2]);minimum=int(sys.argv[3]);"
+        "rows=[] if not os.path.isdir(root) else [(os.path.getmtime(os.path.join(root,n)),n,os.path.join(root,n)) "
+        "for n in os.listdir(root) if not os.path.islink(os.path.join(root,n)) and os.path.isdir(os.path.join(root,n))];"
+        "rows.sort(reverse=True);cutoff=time.time()-days*86400;deleted=[];"
+        "[deleted.append(n) or shutil.rmtree(p) for m,n,p in rows[minimum:] if m<cutoff];"
+        "print(json.dumps({'policy_days':days,'minimum_kept':minimum,'count_before':len(rows),"
+        "'deleted':deleted,'count_after':len(rows)-len(deleted)},separators=(',',':')))"
+    )
+    result = _ssh(
+        ["python3", "-c", script, remote_backup_root, str(keep_days), str(minimum)],
+        timeout=180,
+    )
+    return json.loads(result.stdout)
 
 
 def _rsync_level_to_remote(level_path: Path, remote_host: str, remote_temporary: str) -> None:
@@ -152,10 +206,7 @@ def run_once(*, force_with_players: bool = False, container_ids: set[str] | None
         _ssh([REMOTE_DOCKER, "stop", "--time", "60", SERVER_CONTAINER], timeout=90)
         stopped = True
 
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = f"{remote_backup_root}/{stamp}/{world_id}"
-        _ssh(["/bin/mkdir", "-p", str(Path(backup).parent)])
-        _ssh(["/bin/cp", "-a", remote_world, backup], timeout=180)
+        backup = _create_remote_level_backup(remote_world, remote_backup_root, world_id)
 
         with tempfile.TemporaryDirectory(prefix="paledit-box-job-") as temporary:
             world = Path(temporary) / world_id
@@ -177,10 +228,18 @@ def run_once(*, force_with_players: bool = False, container_ids: set[str] | None
             _rsync_from_remote(verify_world, remote_host, remote_world)
             remote_verification = _verify_world(verify_world, container_ids)
 
+        try:
+            retention = _prune_remote_level_backups(remote_backup_root)
+            retention_warning = None
+        except Exception as error:
+            retention = None
+            retention_warning = str(error)
+
         result = _result(
             "complete", plan_fingerprint=fingerprint, backup=backup, rcon_save=save_response, edit=edit,
             local_verification=local_verification,
-            remote_verification=remote_verification, server=server,
+            remote_verification=remote_verification, server=server, retention=retention,
+            retention_warning=retention_warning,
         )
         _write_state(result)
         return result

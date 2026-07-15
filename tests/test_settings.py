@@ -59,6 +59,18 @@ def test_settings_accept_docker_direct_connection(tmp_path: Path) -> None:
     assert load_settings(path).remote_save_root == "/srv/palworld/Pal/Saved"
 
 
+def test_settings_keep_maintenance_backups_outside_saved_tree() -> None:
+    settings = AppSettings(remote_save_root="/srv/palworld/Pal/Saved")
+
+    assert settings.remote_maintenance_backup_root == "/srv/palworld/palops-backups"
+
+
+def test_settings_keep_nonstandard_save_root_backup_beside_save_tree() -> None:
+    settings = AppSettings(remote_save_root="/server/palworld-saved")
+
+    assert settings.remote_maintenance_backup_root == "/server/palops-backups"
+
+
 @pytest.mark.parametrize(
     "host",
     ["play.example.com", "play.example.com:80", "192.0.2.10:8211", "2001:db8::10", "[2001:db8::10]:8211"],

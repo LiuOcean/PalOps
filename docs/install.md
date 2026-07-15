@@ -102,7 +102,7 @@ Compose 中的挂载用途如下：
 | 挂载 | 权限 | 用途 |
 | --- | --- | --- |
 | `palops-state:/state` | 读写 | 保存设置、聊天、指标、本地存档副本和 `.paledit-backups`；这些目录必须位于同一文件系统，才能进行原子替换 |
-| `${PALWORLD_SERVICE_ROOT}` | 读写 | 读取和备份服务器 Compose 文件；在网页中保存服务器配置时会写入这里 |
+| `${PALWORLD_SERVICE_ROOT}` | 读写 | 读取和备份服务器 Compose 文件，并在 `palops-backups/` 保存位于 `Saved/` 外的维护安全快照 |
 | `${PALWORLD_SAVE_ROOT}` | 只读 | 读取正式服务器存档；该挂载会把服务目录中对应的存档子目录覆盖为只读 |
 | `/var/run/docker.sock` | 读写 | 查询容器、执行 RCON、保存世界和执行经过确认的维护操作 |
 

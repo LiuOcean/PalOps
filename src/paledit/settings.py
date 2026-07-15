@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import UUID
 
 
@@ -37,6 +37,17 @@ class AppSettings:
     @property
     def public_access_hostname(self) -> str:
         return _parse_public_access_address(self.public_access_host)[0] if self.public_access_host else ""
+
+    @property
+    def remote_maintenance_backup_root(self) -> str:
+        """Keep PalOps safety snapshots outside Palworld's archived Saved tree."""
+        save_root = PurePosixPath(self.remote_save_root)
+        data_root = (
+            save_root.parent.parent
+            if save_root.name == "Saved" and save_root.parent.name == "Pal"
+            else save_root.parent
+        )
+        return str(data_root / "palops-backups")
 
 
 def _revision(settings: AppSettings) -> str:
