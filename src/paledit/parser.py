@@ -10,6 +10,7 @@ from typing import Any
 CHARACTER_RAW_PATH = ".worldSaveData.CharacterSaveParameterMap.Value.RawData"
 ITEM_CONTAINER_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.RawData"
 ITEM_SLOT_RAW_PATH = ".worldSaveData.ItemContainerSaveData.Value.Slots.Slots.RawData"
+CHARACTER_CONTAINER_SLOT_RAW_PATH = ".worldSaveData.CharacterContainerSaveData.Value.Slots.Slots.RawData"
 PARSER_REVISION = "paledit-1.0-v0.12-compat-2"
 
 
@@ -32,7 +33,12 @@ _SNAPSHOT_GUARD = RLock()
 def character_custom_properties() -> dict[str, object]:
     from palworld_save_tools.paltypes import PALWORLD_CUSTOM_PROPERTIES
 
-    paths = [CHARACTER_RAW_PATH, ITEM_CONTAINER_RAW_PATH, ITEM_SLOT_RAW_PATH]
+    paths = [
+        CHARACTER_RAW_PATH,
+        ITEM_CONTAINER_RAW_PATH,
+        ITEM_SLOT_RAW_PATH,
+        CHARACTER_CONTAINER_SLOT_RAW_PATH,
+    ]
     return {path: PALWORLD_CUSTOM_PROPERTIES[path] for path in paths}
 
 
