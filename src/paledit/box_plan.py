@@ -164,7 +164,7 @@ def build_box_plan(boxes: tuple[tuple[str, str], ...] | None = None) -> tuple[Bo
     if missing:
         raise ValueError(f"计划包含未知道具：{', '.join(missing)}")
     return tuple(BoxPlan(container_id, label, tuple(
-        (item_id, 999999 if item_id in {"Money", "DogCoin"} else
+        (item_id, 999999 if item_id == "Money" else
          99 if item_id.startswith(("SkillCard_", "Blueprint_")) else
          999 if item_id.startswith(("PalPassiveSkillChange_", "WorkSuitability_", "PalSummon_"))
          or item_id in {"AncientParts2", "PredatorCrystal", "MeteorDrop"} else 9999)

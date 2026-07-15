@@ -30,7 +30,7 @@ def test_box_plan_has_14_unique_boxes_and_fits_capacity() -> None:
         "PalSphere_Ancient_1", "PalSphere_Ancient_2",
     } <= set(by_label["物资箱-捕捉货币"])
     assert by_label["物资箱-捕捉货币"]["Money"] == 999999
-    assert by_label["物资箱-捕捉货币"]["DogCoin"] == 999999
+    assert by_label["物资箱-捕捉货币"]["DogCoin"] == 9999
     assert len(by_label["物资箱-高级物品"]) == 54
     assert {
         "PalSummon_YakushimaBoss002", "PalSummon_YakushimaBoss002_2",
