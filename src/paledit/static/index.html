@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PalOps</title>
   <link rel="icon" href="/assets/palworld-official-icon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/style.css?v=backup-diff-8">
   <link rel="stylesheet" href="/assets/map.css">
   <link rel="stylesheet" href="/assets/icons/phosphor.css">
 </head>
@@ -98,10 +98,56 @@
       </section>
 
       <section class="app-view hidden" data-page="backups">
-        <header class="workspace-header"><div><p class="eyebrow">READ-ONLY BACKUP BROWSER</p><h1><i class="ph ph-floppy-disk-back" aria-hidden="true"></i> 备份记录 <span class="workspace-mode"><i class="ph ph-eye" aria-hidden="true"></i> 只读模式</span></h1><p>统一查看服务器同步前快照、PalOps 历史写入备份、游戏自动备份和批量箱子编辑备份。</p></div><button id="reload-backups" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 重新扫描</button></header>
+        <header class="workspace-header"><div><p class="eyebrow">READ-ONLY BACKUP BROWSER</p><h1><i class="ph ph-floppy-disk-back" aria-hidden="true"></i> 备份记录 <span class="workspace-mode"><i class="ph ph-eye" aria-hidden="true"></i> 只读模式</span></h1><p>选择同一世界的两个备份版本，查看玩家、储物箱、公会与世界数据发生了什么变化。</p></div><button id="reload-backups" class="secondary"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 重新扫描</button></header>
         <nav class="section-nav world-nav" aria-label="世界工作区"><button data-route="world/containers"><i class="ph ph-archive" aria-hidden="true"></i>储物箱</button><button data-route="world/players"><i class="ph ph-users" aria-hidden="true"></i>玩家</button><button data-route="world/guilds"><i class="ph ph-buildings" aria-hidden="true"></i>公会</button><button data-route="world/backups"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i>备份</button></nav>
         <p id="backup-result" class="sync-result" aria-live="polite"></p><section class="backup-stats"><article><i class="ph ph-archive-box" aria-hidden="true"></i><span><small>备份总数</small><strong id="backup-total">—</strong></span></article><article><i class="ph ph-hard-drives" aria-hidden="true"></i><span><small>占用空间</small><strong id="backup-size">—</strong></span></article><article><i class="ph ph-calendar-x" aria-hidden="true"></i><span><small>超过 30 天</small><strong id="backup-review">—</strong></span></article><article><i class="ph ph-eye" aria-hidden="true"></i><span><small>操作模式</small><strong>仅查看</strong></span></article></section>
-        <section class="panel backup-panel"><div class="backup-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索备份</span><input id="backup-query" type="search" placeholder="搜索备份名称、世界 ID 或路径"></label><label>来源<select id="backup-source"><option value="">全部来源</option><option value="sync">服务器同步前快照</option><option value="editor">PalOps 写入前备份</option><option value="game">游戏自动备份</option><option value="box_plan">批量箱子编辑备份</option></select></label></div><p id="backup-summary" class="resource-summary">正在扫描本地备份目录…</p><div class="backup-browser"><div id="backup-list" class="backup-list"><div class="empty">正在读取备份索引…</div></div><aside id="backup-detail" class="backup-detail"><div class="detail-empty"><i class="ph ph-floppy-disk-back" aria-hidden="true"></i><strong>选择一份备份</strong><p>恢复、删除和技术路径集中显示在这里。</p></div></aside></div></section>
+        <section id="backup-compare-tray" class="panel backup-compare-tray hidden" aria-label="待比较版本">
+          <div class="compare-tray-heading"><small>版本比较</small><strong id="backup-compare-count">请选择两个备份</strong></div>
+          <div id="backup-compare-base" class="compare-version-slot"><span class="compare-marker base">A</span><div><small>基准版本</small><strong>尚未选择</strong><time>—</time></div></div>
+          <button id="swap-backups" class="icon-button" type="button" title="交换版本" aria-label="交换版本" disabled><i class="ph ph-arrows-left-right" aria-hidden="true"></i></button>
+          <div id="backup-compare-target" class="compare-version-slot"><span class="compare-marker target">B</span><div><small>对比版本</small><strong>尚未选择</strong><time>—</time></div></div>
+          <div class="compare-validation"><i class="ph ph-check-circle" aria-hidden="true"></i><span id="backup-compare-validation">选择后检查世界</span><label id="backup-compare-world-label" class="hidden">世界<select id="backup-compare-world"></select></label></div>
+          <button id="start-backup-diff" class="primary" type="button" disabled><i class="ph ph-scales" aria-hidden="true"></i> 比较两个版本</button>
+        </section>
+        <section class="panel backup-panel"><div class="backup-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索备份</span><input id="backup-query" type="search" placeholder="搜索备份名称、世界 ID 或路径"></label><label>来源<select id="backup-source"><option value="">全部来源</option><option value="sync">服务器同步前快照</option><option value="editor">PalOps 写入前备份</option><option value="game">游戏自动备份</option><option value="box_plan">批量箱子编辑备份</option></select></label></div><p id="backup-summary" class="resource-summary">正在扫描本地备份目录…</p><div class="backup-browser"><div id="backup-list" class="backup-list"><div class="empty">正在读取备份索引…</div></div><aside id="backup-detail" class="backup-detail"><div class="detail-empty"><i class="ph ph-scales" aria-hidden="true"></i><strong>选择两个备份</strong><p>用每行左侧的选择按钮标记基准与对比版本。</p></div></aside></div></section>
+      </section>
+
+      <section class="app-view hidden" data-page="backup-diff">
+        <header class="workspace-header diff-header"><div><button class="back-link" type="button" data-route="world/backups"><i class="ph ph-arrow-left" aria-hidden="true"></i> 备份记录</button><p class="eyebrow">BACKUP VERSION DIFF</p><h1><i class="ph ph-scales" aria-hidden="true"></i> 版本对比 · 变化轨迹 <span class="workspace-mode"><i class="ph ph-eye" aria-hidden="true"></i> 只读模式</span></h1><p>从两个快照读懂这段时间的变化，再逐项核对字段证据；结果不会修改服务器或备份文件。</p></div><button class="secondary" type="button" data-route="world/backups"><i class="ph ph-list-bullets" aria-hidden="true"></i> 返回备份列表</button></header>
+        <section id="diff-version-bar" class="panel diff-version-bar" aria-label="比较版本">
+          <label class="diff-version-card base"><span>基准版本</span><time id="diff-base-time">—</time><select id="diff-base-select" aria-label="基准版本"></select></label>
+          <div class="diff-interval" aria-label="版本间隔"><span aria-hidden="true"></span><strong id="diff-duration">版本间隔</strong><small id="diff-duration-detail">—</small><span aria-hidden="true"></span></div>
+          <label class="diff-version-card target"><span>对比版本</span><time id="diff-target-time">—</time><select id="diff-target-select" aria-label="对比版本"></select></label>
+          <button id="diff-swap" class="secondary diff-swap" type="button" title="交换版本" aria-label="交换版本"><i class="ph ph-arrows-left-right" aria-hidden="true"></i><span>交换版本</span></button>
+          <span id="diff-world-state" class="diff-world-state"><i class="ph ph-check-circle" aria-hidden="true"></i> 同一世界</span>
+          <button id="diff-run" class="primary" type="button"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i> 重新比较</button>
+        </section>
+        <section id="diff-empty" class="panel diff-empty"><i class="ph ph-scales" aria-hidden="true"></i><h2>还没有版本差异</h2><p>返回备份列表，选择同一世界的两个版本开始比较。</p><button class="primary" type="button" data-route="world/backups">选择备份</button></section>
+        <section id="diff-loading" class="panel diff-loading hidden" aria-live="polite" aria-busy="true"><span class="diff-loading-icon"><i id="diff-loading-icon" class="ph ph-circle-notch" aria-hidden="true"></i></span><div><h2 id="diff-loading-title">正在生成版本差异</h2><p id="diff-loading-message">正在读取两个备份并解析世界数据…</p><div class="diff-progress"><span id="diff-progress-bar"></span></div><small class="diff-loading-note">首次比较通常需要约 10–20 秒；相同版本组合会使用本地缓存。</small><div id="diff-error-actions" class="diff-error-actions hidden"><button id="diff-retry" class="primary" type="button"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i> 重试比较</button><button class="secondary" type="button" data-route="world/backups">返回备份列表</button></div></div></section>
+        <section id="diff-content" class="hidden">
+          <section class="diff-summary" aria-label="差异摘要">
+            <div class="diff-summary-copy"><i class="ph ph-chart-line-up" aria-hidden="true"></i><div><small>比较完成</small><strong id="diff-headline">正在整合两个版本的变化</strong><p id="diff-overview-context">—</p></div></div>
+            <div class="diff-state-totals" aria-label="变化类型统计"><span>对象 <strong id="diff-total">—</strong></span><span>关键 <strong id="diff-important">—</strong></span><span class="added">新增 <strong id="diff-added">—</strong></span><span class="modified">修改 <strong id="diff-modified">—</strong></span><span class="removed">删除 <strong id="diff-removed">—</strong></span></div>
+            <nav class="diff-categories" aria-label="变化分类"><button type="button" class="active" data-diff-category=""><span><i class="ph ph-circles-three-plus" aria-hidden="true"></i>全部</span><strong id="diff-category-all">0</strong></button><div id="diff-category-list"></div></nav>
+          </section>
+          <section id="diff-browser" class="panel diff-browser" aria-busy="false">
+            <div class="diff-main">
+              <div class="diff-toolbar">
+                <label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索变化</span><input id="diff-query" type="search" placeholder="搜索对象、名称或字段"></label>
+                <div id="diff-type-filter" class="diff-type-filter" role="group" aria-label="变化类型"><button type="button" class="active" data-diff-type="">全部类型</button><button type="button" data-diff-type="added">新增</button><button type="button" data-diff-type="modified">修改</button><button type="button" data-diff-type="removed">删除</button></div>
+                <label class="diff-important-toggle"><input id="diff-important-only" type="checkbox"><span>仅看关键变化</span><i class="ph ph-star" aria-hidden="true"></i></label>
+              </div>
+              <p id="diff-result-summary" class="resource-summary">正在读取变化…</p>
+              <div class="diff-timeline-frame">
+                <div class="diff-timeline-boundary start"><span></span><div><small>基准快照</small><strong id="diff-timeline-start">—</strong></div></div>
+                <div id="diff-changes" class="diff-changes"><div class="empty">正在读取变化…</div></div>
+                <div class="diff-timeline-boundary end"><span></span><div><small>到达对比快照</small><strong id="diff-timeline-end">—</strong></div></div>
+              </div>
+              <div class="diff-footer"><button id="diff-more" class="secondary hidden" type="button">继续加载</button></div>
+            </div>
+            <aside id="diff-inspector" class="diff-inspector" aria-live="polite"><div class="detail-empty"><i class="ph ph-cursor-click" aria-hidden="true"></i><strong>选择一项变化</strong><p>这里会显示对象摘要和基准、对比版本的字段证据。</p></div></aside>
+          </section>
+        </section>
       </section>
 
       <section class="app-view hidden" data-page="map">
@@ -249,6 +295,6 @@
   <template id="container-template"><button class="resource-row container-row"><span class="resource-row-icon"><i class="ph ph-archive" aria-hidden="true"></i></span><span class="resource-row-copy"><strong class="container-label"></strong><small class="container-type"></small></span><span class="container-usage"></span><code class="container-id"></code></button></template>
   <template id="container-detail-template"><article class="container-detail-content"><header><div class="detail-title"><span class="detail-icon"><i class="ph ph-archive" aria-hidden="true"></i></span><div><p class="eyebrow">储物箱</p><h2 class="container-label"></h2><p class="container-type"></p></div></div><span class="read-only-state"><i class="ph ph-eye" aria-hidden="true"></i> 只读</span></header><div class="detail-stats"><div><small>已用槽位</small><strong class="slot-usage"></strong></div><div><small>道具总量</small><strong class="item-total"></strong></div></div><div class="detail-table"><div class="detail-table-head"><span>道具</span><span>数量</span></div><div class="container-items"></div></div><details class="technical-info"><summary>查看技术信息</summary><dl><div><dt>容器 GUID</dt><dd><code class="container-id"></code></dd></div><div><dt>对象类型</dt><dd><code class="object-id"></code></dd></div></dl></details></article></template>
   <template id="user-template"><article class="user-card"><div class="user-title"><div><p class="eyebrow">玩家存档</p><div class="user-name-row"><h2 class="user-name"></h2><span class="owner-badge hidden"><i class="ph ph-star" aria-hidden="true"></i> 我的角色</span></div><code class="user-id"></code></div><div class="user-title-meta"><span class="pal-count"></span><span class="read-only-state"><i class="ph ph-eye" aria-hidden="true"></i> 只读</span></div></div><div class="detail-tabs" role="tablist"><button data-tab="profile" class="active" role="tab" aria-selected="true">基础资料</button><button data-tab="inventory" role="tab" aria-selected="false">背包道具</button><button data-tab="pals" role="tab" aria-selected="false">拥有的帕鲁</button></div><div class="user-form tab-pane" data-pane="profile"><label>用户昵称<input name="nickname" maxlength="64" readonly></label><label>等级<input name="level" type="number" readonly></label><label>经验值<input name="experience" type="number" readonly></label><label>未分配属性点<input name="unused_status_points" type="number" readonly></label><label>饱食度<input name="satiety" type="number" readonly></label><label>科技点<input name="technology_points" type="number" readonly></label><div class="readonly-data"></div><span class="save-result"><i class="ph ph-lock-key" aria-hidden="true"></i> 当前仅供查看</span></div><section class="inventory-list tab-pane hidden" data-pane="inventory"></section><section class="pal-list tab-pane hidden" data-pane="pals"><div class="owned-pal-toolbar"><label class="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span class="sr-only">搜索拥有的帕鲁</span><input class="owned-pal-query" type="search" placeholder="搜索帕鲁、昵称、技能或 ID"></label><span class="owned-pal-summary"></span></div><div class="owned-pal-results"></div><button type="button" class="owned-pal-more secondary"></button></section></article></template>
-  <script src="/assets/app.js"></script>
+  <script src="/assets/app.js?v=backup-diff-10"></script>
 </body>
 </html>

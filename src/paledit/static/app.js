@@ -56,6 +56,15 @@ let mapTileFrame = null;
 let serverConfig = null;
 let backupData = null;
 let selectedBackupId = null;
+let selectedBackupIds = [];
+let backupDiffJobId = null;
+let backupDiffMeta = null;
+let backupDiffPollTimer = null;
+let backupDiffChanges = [];
+const backupDiffFilters = {category:'', changeType:'', query:'', importantOnly:false, offset:0, nextOffset:null, loading:false};
+let backupDiffRequest = null;
+let backupDiffRequestId = 0;
+let backupDiffSelectedGroupId = null;
 let restartConfirmationToken = null;
 const CHAT_BACKGROUND_REFRESH_MS = 30_000;
 const SIDEBAR_STORAGE_KEY = 'paledit.sidebar.collapsed';
@@ -85,6 +94,7 @@ const ROUTES = {
   'world/players': {page:'saves', root:'world', resource:'users'},
   'world/guilds': {page:'saves', root:'world', resource:'guilds'},
   'world/backups': {page:'backups', root:'world'},
+  'world/backups/compare': {page:'backup-diff', root:'world'},
   map: {page:'map', root:'map'},
   'manage/players': {page:'players', root:'manage'},
   'manage/chat': {page:'chat', root:'manage'},
@@ -157,6 +167,7 @@ function applyRoute(route = currentRoute()) {
   if (state.page === 'config' && !serverConfig) loadServerConfig();
   if (state.page === 'settings' && !appSettings) loadAppSettings();
   if (state.page === 'backups' && !backupData) loadBackups();
+  if (state.page === 'backup-diff') renderBackupDiffState();
   if (state.page === 'map') loadWorldMap();
   if (state.page === 'chat') {
     if (chatData) renderChat({forceBottom: true});
@@ -371,6 +382,96 @@ function setBackupResult(message, kind = '') {
   node.className = `sync-result ${kind}`.trim();
 }
 
+function backupById(backupId) {
+  return (backupData?.backups || []).find(backup => backup.backup_id === backupId);
+}
+
+function selectedBackups() {
+  return selectedBackupIds.map(backupById).filter(Boolean);
+}
+
+function commonBackupWorlds(backups = selectedBackups()) {
+  if (!backups.length) return [];
+  return backups.slice(1).reduce(
+    (worlds, backup) => worlds.filter(worldId => (backup.world_ids || []).includes(worldId)),
+    [...(backups[0].world_ids || [])],
+  );
+}
+
+function renderCompareVersionSlot(selector, backup) {
+  const slot = document.querySelector(selector);
+  slot.querySelector('strong').textContent = backup?.name || '尚未选择';
+  const time = slot.querySelector('time');
+  time.dateTime = backup?.created_at || '';
+  time.textContent = backup ? new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false}) : '—';
+}
+
+function syncBackupCompareTray() {
+  const backups = selectedBackups();
+  const tray = document.querySelector('#backup-compare-tray');
+  tray.classList.toggle('hidden', backups.length === 0);
+  document.querySelector('#backup-compare-count').textContent = backups.length === 2 ? '已选择 2 个备份' : '还需选择 1 个备份';
+  renderCompareVersionSlot('#backup-compare-base', backups[0]);
+  renderCompareVersionSlot('#backup-compare-target', backups[1]);
+  document.querySelector('#swap-backups').disabled = backups.length !== 2;
+  const start = document.querySelector('#start-backup-diff');
+  const validation = document.querySelector('#backup-compare-validation');
+  const worldLabel = document.querySelector('#backup-compare-world-label');
+  const worldSelect = document.querySelector('#backup-compare-world');
+  const worlds = commonBackupWorlds(backups);
+  worldSelect.innerHTML = '';
+  for (const worldId of worlds) {
+    const option = document.createElement('option'); option.value = worldId; option.textContent = worldId; worldSelect.append(option);
+  }
+  worldLabel.classList.toggle('hidden', worlds.length <= 1);
+  if (backups.length < 2) {
+    validation.textContent = backups.length ? '请选择同一世界的另一个版本' : '选择后检查世界';
+    validation.parentElement.classList.remove('error');
+    start.disabled = true;
+  } else if (!worlds.length) {
+    validation.textContent = '两个备份没有共同世界';
+    validation.parentElement.classList.add('error');
+    start.disabled = true;
+  } else {
+    validation.textContent = worlds.length === 1 ? '同一世界验证通过' : `发现 ${worlds.length} 个共同世界`;
+    validation.parentElement.classList.remove('error');
+    start.disabled = false;
+  }
+}
+
+function toggleBackupComparison(backupId) {
+  const backup = backupById(backupId);
+  if (!backup?.has_level_save || !(backup.world_ids || []).length) {
+    setBackupResult('这份备份没有可比较的世界存档。', 'error');
+    return;
+  }
+  if (selectedBackupIds.includes(backupId)) {
+    selectedBackupIds = selectedBackupIds.filter(value => value !== backupId);
+  } else if (selectedBackupIds.length < 2) {
+    selectedBackupIds = [...selectedBackupIds, backupId];
+  } else {
+    selectedBackupIds = [selectedBackupIds[0], backupId];
+  }
+  if (selectedBackupIds.length === 2) {
+    selectedBackupIds.sort((leftId, rightId) => {
+      const left = backupById(leftId);
+      const right = backupById(rightId);
+      const timeDelta = new Date(left?.created_at || 0).getTime() - new Date(right?.created_at || 0).getTime();
+      return timeDelta || leftId.localeCompare(rightId);
+    });
+  }
+  renderBackups();
+  syncBackupCompareTray();
+  setBackupResult(selectedBackupIds.length === 2 ? '已选择两个版本，可以开始只读比较。' : '已选择一个版本，请再选择一份备份。');
+}
+
+function swapSelectedBackups() {
+  if (selectedBackupIds.length !== 2) return;
+  selectedBackupIds = [selectedBackupIds[1], selectedBackupIds[0]];
+  renderBackups();
+  syncBackupCompareTray();
+}
+
 function renderBackups() {
   const root = document.querySelector('#backup-list');
   const query = document.querySelector('#backup-query').value.trim().toLocaleLowerCase('zh-CN');
@@ -384,8 +485,18 @@ function renderBackups() {
       const heading = document.createElement('h3'); heading.className = 'backup-group-label'; heading.textContent = day;
       root.append(heading); currentDay = day;
     }
-    const article = document.createElement('button'); article.type = 'button'; article.className = 'backup-row';
+    const article = document.createElement('article'); article.className = 'backup-row';
     article.dataset.backupId = backup.backup_id;
+    const comparisonIndex = selectedBackupIds.indexOf(backup.backup_id);
+    const compare = document.createElement('button'); compare.type = 'button'; compare.className = 'backup-compare-toggle';
+    compare.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
+    compare.setAttribute('aria-pressed', String(comparisonIndex >= 0));
+    compare.title = compare.disabled ? '这份备份没有可比较的世界存档' : (comparisonIndex >= 0 ? '取消选择' : '选择用于版本比较');
+    compare.innerHTML = comparisonIndex >= 0
+      ? `<span class="compare-marker ${comparisonIndex === 0 ? 'base' : 'target'}">${comparisonIndex === 0 ? 'A' : 'B'}</span>`
+      : '<i class="ph ph-square" aria-hidden="true"></i><span class="sr-only">选择用于比较</span>';
+    compare.addEventListener('click', () => toggleBackupComparison(backup.backup_id));
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'backup-row-open';
     const icon = document.createElement('span'); icon.className = `backup-icon ${backup.source}`; icon.innerHTML = '<i class="ph ph-archive-box" aria-hidden="true"></i>';
     const copy = document.createElement('span'); copy.className = 'backup-copy';
     const title = document.createElement('strong'); title.textContent = backup.name;
@@ -398,10 +509,11 @@ function renderBackups() {
     const size = document.createElement('strong'); size.textContent = formatBytes(backup.size_bytes);
     const files = document.createElement('small'); files.textContent = `${backup.is_archive ? '压缩归档' : `${backup.file_count.toLocaleString()} 个文件`}${backup.has_level_save ? ' · 含 Level.sav' : ''}${backup.protected ? ' · 24 小时保护中' : ''}`;
     stats.append(size, files);
-    article.append(icon, copy, sourceBadge, stats);
+    open.append(icon, copy, sourceBadge, stats);
+    open.addEventListener('click', () => selectBackup(backup.backup_id));
+    article.append(compare, open);
     article.classList.toggle('active', backup.backup_id === selectedBackupId);
-    article.setAttribute('aria-selected', String(backup.backup_id === selectedBackupId));
-    article.addEventListener('click', () => selectBackup(backup.backup_id));
+    article.classList.toggle('comparison-selected', comparisonIndex >= 0);
     root.append(article);
   }
   document.querySelector('#backup-summary').textContent = `显示 ${rows.length} / ${backupData?.count || 0} 份备份 · 固定目录只读扫描`;
@@ -418,7 +530,7 @@ function selectBackup(backupId, {preserveList = false} = {}) {
   selectedBackupId = backupId;
   if (!preserveList) document.querySelectorAll('.backup-row').forEach(row => {
     const active = row.dataset.backupId === backupId;
-    row.classList.toggle('active', active); row.setAttribute('aria-selected', String(active));
+    row.classList.toggle('active', active);
   });
   renderBackupDetail((backupData?.backups || []).find(backup => backup.backup_id === backupId));
 }
@@ -449,8 +561,13 @@ function renderBackupDetail(backup) {
   const path = document.createElement('details'); path.className = 'technical-info';
   path.innerHTML = '<summary>查看技术路径</summary><code></code>'; path.querySelector('code').textContent = backup.path;
   const readOnly = document.createElement('p'); readOnly.className = 'backup-read-only';
-  readOnly.innerHTML = '<i class="ph ph-eye" aria-hidden="true"></i> 当前界面仅供查看，不提供恢复或删除操作。';
-  article.append(path, readOnly); root.append(article);
+  readOnly.innerHTML = '<i class="ph ph-eye" aria-hidden="true"></i> 版本比较为只读操作，不会修改服务器或备份。';
+  const compare = document.createElement('button'); compare.type = 'button'; compare.className = 'secondary backup-detail-compare';
+  const selected = selectedBackupIds.includes(backup.backup_id);
+  compare.innerHTML = `<i class="ph ${selected ? 'ph-x' : 'ph-scales'}" aria-hidden="true"></i> ${selected ? '取消比较选择' : '选择用于比较'}`;
+  compare.disabled = !backup.has_level_save || !(backup.world_ids || []).length;
+  compare.addEventListener('click', () => toggleBackupComparison(backup.backup_id));
+  article.append(path, readOnly, compare); root.append(article);
 }
 
 async function loadBackups() {
@@ -468,12 +585,405 @@ async function loadBackups() {
     document.querySelector('#backup-review').textContent = `${data.retention.review_count.toLocaleString()} 份`;
     const latest = data.backups?.[0];
     document.querySelector('#overview-last-backup').textContent = latest ? new Date(latest.created_at).toLocaleString('zh-CN', {hour12:false}) : '尚无备份';
+    selectedBackupIds = selectedBackupIds.filter(backupId => data.backups.some(backup => backup.backup_id === backupId));
     renderBackups();
+    syncBackupCompareTray();
   } catch (error) {
     root.innerHTML = '<div class="empty"></div>';
     root.querySelector('.empty').textContent = error.message;
     document.querySelector('#backup-summary').textContent = '备份索引暂不可用';
   } finally { button.disabled = false; }
+}
+
+function populateDiffVersionSelectors() {
+  const base = document.querySelector('#diff-base-select');
+  const target = document.querySelector('#diff-target-select');
+  const eligible = (backupData?.backups || []).filter(backup => backup.has_level_save && (backup.world_ids || []).length);
+  for (const select of [base, target]) {
+    select.innerHTML = '';
+    for (const backup of eligible) {
+      const option = document.createElement('option'); option.value = backup.backup_id;
+      option.textContent = `${backup.name} · ${new Date(backup.created_at).toLocaleString('zh-CN', {hour12:false})}`;
+      select.append(option);
+    }
+  }
+  if (selectedBackupIds[0]) base.value = selectedBackupIds[0];
+  if (selectedBackupIds[1]) target.value = selectedBackupIds[1];
+}
+
+function showBackupDiffLoading(message = '正在读取两个备份并解析世界数据…', progress = 15) {
+  document.querySelector('#diff-empty').classList.add('hidden');
+  document.querySelector('#diff-content').classList.add('hidden');
+  const loading = document.querySelector('#diff-loading');
+  loading.classList.remove('hidden', 'error');
+  loading.setAttribute('aria-busy', 'true');
+  document.querySelector('#diff-loading-icon').className = 'ph ph-circle-notch';
+  document.querySelector('#diff-error-actions').classList.add('hidden');
+  document.querySelector('#diff-loading-title').textContent = '正在生成版本差异';
+  document.querySelector('#diff-loading-message').textContent = message;
+  document.querySelector('#diff-progress-bar').style.width = `${progress}%`;
+}
+
+function showBackupDiffError(message) {
+  document.querySelector('#diff-empty').classList.add('hidden');
+  document.querySelector('#diff-content').classList.add('hidden');
+  const loading = document.querySelector('#diff-loading'); loading.classList.remove('hidden'); loading.classList.add('error');
+  loading.setAttribute('aria-busy', 'false');
+  document.querySelector('#diff-loading-icon').className = 'ph ph-warning-circle';
+  document.querySelector('#diff-error-actions').classList.remove('hidden');
+  document.querySelector('#diff-loading-title').textContent = '版本比较失败';
+  document.querySelector('#diff-loading-message').textContent = message;
+  document.querySelector('#diff-progress-bar').style.width = '100%';
+}
+
+function syncBackupDiffFilterControls() {
+  document.querySelector('#diff-query').value = backupDiffFilters.query;
+  document.querySelector('#diff-important-only').checked = backupDiffFilters.importantOnly;
+  document.querySelectorAll('[data-diff-type]').forEach(button => button.classList.toggle('active', button.dataset.diffType === backupDiffFilters.changeType));
+}
+
+function resetBackupDiffFilters() {
+  backupDiffRequest?.abort();
+  backupDiffRequest = null;
+  backupDiffRequestId += 1;
+  Object.assign(backupDiffFilters, {category:'', changeType:'', query:'', importantOnly:false, offset:0, nextOffset:null, loading:false});
+  backupDiffChanges = [];
+  backupDiffSelectedGroupId = null;
+  syncBackupDiffFilterControls();
+  const more = document.querySelector('#diff-more');
+  more.classList.add('hidden');
+  more.disabled = false;
+  more.textContent = '继续加载';
+  document.querySelector('#diff-browser').setAttribute('aria-busy', 'false');
+}
+
+function formatDiffSnapshotTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  const pad = number => String(number).padStart(2, '0');
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatDiffDuration(baseValue, targetValue) {
+  const base = new Date(baseValue).getTime();
+  const target = new Date(targetValue).getTime();
+  if (!Number.isFinite(base) || !Number.isFinite(target)) return {headline:'版本间隔', detail:'时间未知'};
+  const minutes = Math.max(0, Math.round(Math.abs(target - base) / 60000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const remainder = minutes % 60;
+  const parts = [];
+  if (days) parts.push(`${days} 天`);
+  if (hours) parts.push(`${hours} 小时`);
+  if (remainder || !parts.length) parts.push(`${remainder} 分钟`);
+  return {headline:parts.slice(0, 2).join(' '), detail:'两个只读快照之间'};
+}
+
+function backupDiffChangeSummary(change) {
+  const field = change.entity_label && change.entity_id !== change.group_id
+    ? `${change.entity_label} · ${change.field}`
+    : change.field;
+  if (change.change_type === 'modified') return `${field}：${change.before} → ${change.after}`;
+  if (change.field === '记录') return `${change.change_type_label}记录`;
+  return `${change.change_type_label} · ${field}`;
+}
+
+function backupDiffGroupSummary(group, limit = 2) {
+  const visible = group.changes.slice(0, limit).map(backupDiffChangeSummary);
+  if (group.changes.length > limit) visible.push(`另 ${group.changes.length - limit} 项`);
+  return visible.join(' · ');
+}
+
+function backupDiffValidation() {
+  const backups = selectedBackups();
+  if (backups.length !== 2) return {valid:false, message:'请选择两个备份版本。'};
+  if (backups[0].backup_id === backups[1].backup_id) return {valid:false, message:'基准版本和对比版本不能相同。'};
+  if (!commonBackupWorlds(backups).length) return {valid:false, message:'两个版本不包含共同世界，无法比较。'};
+  return {valid:true, message:'同一世界'};
+}
+
+function renderBackupDiffState() {
+  populateDiffVersionSelectors();
+  if (!backupDiffJobId) {
+    document.querySelector('#diff-empty').classList.remove('hidden');
+    document.querySelector('#diff-loading').classList.add('hidden');
+    document.querySelector('#diff-content').classList.add('hidden');
+  } else if (backupDiffMeta?.status === 'ready') {
+    renderBackupDiffMeta();
+  } else {
+    showBackupDiffLoading();
+  }
+}
+
+async function startBackupDiff() {
+  const backups = selectedBackups();
+  const worlds = commonBackupWorlds(backups);
+  const worldSelect = document.querySelector('#backup-compare-world');
+  const worldId = worldSelect.value || worlds[0];
+  const validation = backupDiffValidation();
+  if (!validation.valid || !worldId) {
+    setBackupResult(validation.message, 'error');
+    if (currentRoute() === 'world/backups/compare') showBackupDiffError(validation.message);
+    return;
+  }
+  const buttons = [document.querySelector('#start-backup-diff'), document.querySelector('#diff-run')].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; });
+  clearTimeout(backupDiffPollTimer);
+  backupDiffJobId = null;
+  backupDiffMeta = null;
+  resetBackupDiffFilters();
+  try {
+    const response = await fetch('/api/backups/diffs', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({base_backup_id:backups[0].backup_id, target_backup_id:backups[1].backup_id, world_id:worldId}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '无法创建版本比较');
+    backupDiffJobId = data.job_id;
+    backupDiffMeta = data;
+    navigate('world/backups/compare');
+    showBackupDiffLoading(data.message, data.progress);
+    scheduleBackupDiffPoll(0);
+  } catch (error) {
+    setBackupResult(error.message, 'error');
+    if (currentRoute() === 'world/backups/compare') showBackupDiffError(error.message);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+function scheduleBackupDiffPoll(delay = 700) {
+  clearTimeout(backupDiffPollTimer);
+  backupDiffPollTimer = setTimeout(pollBackupDiff, delay);
+}
+
+async function pollBackupDiff() {
+  if (!backupDiffJobId) return;
+  try {
+    const response = await fetch(`/api/backups/diffs/${encodeURIComponent(backupDiffJobId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '版本比较任务读取失败');
+    backupDiffMeta = data;
+    if (data.status === 'ready') {
+      renderBackupDiffMeta();
+      await loadBackupDiffChanges();
+    } else if (data.status === 'error') {
+      showBackupDiffError(data.error || data.message || '版本比较失败');
+    } else {
+      showBackupDiffLoading(data.message, data.progress);
+      scheduleBackupDiffPoll();
+    }
+  } catch (error) {
+    showBackupDiffError(error.message);
+  }
+}
+
+function renderBackupDiffMeta() {
+  if (!backupDiffMeta || backupDiffMeta.status !== 'ready') return;
+  document.querySelector('#diff-empty').classList.add('hidden');
+  document.querySelector('#diff-loading').classList.add('hidden');
+  document.querySelector('#diff-content').classList.remove('hidden');
+  document.querySelector('#diff-browser').setAttribute('aria-busy', 'false');
+  syncBackupDiffFilterControls();
+  populateDiffVersionSelectors();
+  document.querySelector('#diff-base-select').value = backupDiffMeta.versions.base.backup_id;
+  document.querySelector('#diff-target-select').value = backupDiffMeta.versions.target.backup_id;
+  const baseVersion = backupDiffMeta.versions.base;
+  const targetVersion = backupDiffMeta.versions.target;
+  const duration = formatDiffDuration(baseVersion.created_at, targetVersion.created_at);
+  document.querySelector('#diff-base-time').textContent = formatDiffSnapshotTime(baseVersion.created_at);
+  document.querySelector('#diff-target-time').textContent = formatDiffSnapshotTime(targetVersion.created_at);
+  document.querySelector('#diff-timeline-start').textContent = formatDiffSnapshotTime(baseVersion.created_at);
+  document.querySelector('#diff-timeline-end').textContent = formatDiffSnapshotTime(targetVersion.created_at);
+  document.querySelector('#diff-duration').textContent = duration.headline;
+  document.querySelector('#diff-duration-detail').textContent = duration.detail;
+  document.querySelector('#diff-world-state').innerHTML = '<i class="ph ph-check-circle" aria-hidden="true"></i> 同一世界验证通过';
+  const summary = backupDiffMeta.summary;
+  document.querySelector('#diff-total').textContent = summary.total.toLocaleString();
+  document.querySelector('#diff-important').textContent = summary.important.toLocaleString();
+  document.querySelector('#diff-added').textContent = summary.added.toLocaleString();
+  document.querySelector('#diff-modified').textContent = summary.modified.toLocaleString();
+  document.querySelector('#diff-removed').textContent = summary.removed.toLocaleString();
+  document.querySelector('#diff-headline').textContent = `这段时间内发现 ${summary.total.toLocaleString()} 个对象变化，其中 ${summary.important.toLocaleString()} 项值得关注`;
+  document.querySelector('#diff-overview-context').textContent = `${backupDiffMeta.overview.headline} · ${backupDiffMeta.overview.field_total.toLocaleString()} 项字段证据`;
+  document.querySelector('#diff-category-all').textContent = summary.total.toLocaleString();
+  const root = document.querySelector('#diff-category-list'); root.innerHTML = '';
+  const icons = {players:'ph-user', pals:'ph-paw-print', containers:'ph-archive', guilds:'ph-buildings', world:'ph-globe', files:'ph-file'};
+  for (const category of backupDiffMeta.categories) {
+    const button = document.createElement('button'); button.type = 'button'; button.dataset.diffCategory = category.key;
+    button.classList.toggle('active', backupDiffFilters.category === category.key);
+    button.innerHTML = `<span><i class="ph ${icons[category.key]}" aria-hidden="true"></i>${category.label}</span><strong>${category.total.toLocaleString()}</strong>`;
+    button.addEventListener('click', () => setBackupDiffCategory(category.key));
+    root.append(button);
+  }
+  document.querySelector('[data-diff-category=""]').classList.toggle('active', !backupDiffFilters.category);
+}
+
+function setBackupDiffCategory(category) {
+  backupDiffFilters.category = category;
+  document.querySelectorAll('[data-diff-category]').forEach(button => button.classList.toggle('active', button.dataset.diffCategory === category));
+  loadBackupDiffChanges();
+}
+
+function setBackupDiffType(changeType) {
+  backupDiffFilters.changeType = changeType;
+  document.querySelectorAll('[data-diff-type]').forEach(button => button.classList.toggle('active', button.dataset.diffType === changeType));
+  loadBackupDiffChanges();
+}
+
+function createBackupDiffFieldRow(change) {
+  const row = document.createElement('div'); row.className = `diff-inspector-field ${change.change_type}`;
+  const field = document.createElement('span'); field.className = 'diff-inspector-field-name';
+  const label = document.createElement('strong'); label.textContent = change.field;
+  const owner = document.createElement('small'); owner.textContent = change.entity_id === change.group_id ? '对象本身' : change.entity_label;
+  field.append(label, owner);
+  const before = document.createElement('span'); before.className = 'diff-value before'; before.textContent = change.before; before.title = change.before;
+  const arrow = document.createElement('i'); arrow.className = 'ph ph-arrow-right diff-arrow'; arrow.setAttribute('aria-hidden', 'true');
+  const after = document.createElement('span'); after.className = 'diff-value after'; after.textContent = change.after; after.title = change.after;
+  const type = document.createElement('span'); type.className = `diff-type ${change.change_type}`; type.textContent = change.change_type_label;
+  row.append(field, before, arrow, after, type);
+  return row;
+}
+
+function renderBackupDiffInspector(group) {
+  const root = document.querySelector('#diff-inspector'); root.innerHTML = '';
+  if (!group) {
+    root.innerHTML = '<div class="detail-empty"><i class="ph ph-cursor-click" aria-hidden="true"></i><strong>选择一项变化</strong><p>这里会显示对象摘要和基准、对比版本的字段证据。</p></div>';
+    return;
+  }
+  const icons = {players:'ph-user', pals:'ph-paw-print', containers:'ph-archive', guilds:'ph-buildings', world:'ph-globe', files:'ph-file'};
+  const header = document.createElement('header'); header.className = 'diff-inspector-header';
+  header.innerHTML = `<span class="diff-inspector-icon"><i class="ph ${icons[group.category] || 'ph-file'}" aria-hidden="true"></i></span><div><small></small><h2></h2><p></p></div><span class="diff-type ${group.change_type}"></span>`;
+  header.querySelector('small').textContent = `${group.category_label} · ${group.entity_type_label}`;
+  header.querySelector('h2').textContent = group.entity_label;
+  header.querySelector('p').textContent = backupDiffGroupSummary(group, 3);
+  header.querySelector('.diff-type').textContent = group.change_type_label;
+
+  const meta = document.createElement('dl'); meta.className = 'diff-inspector-meta';
+  for (const [label, value] of [['对象标识', group.entity_id], ['字段变化', `${group.field_count} 项`], ['关注级别', group.important ? '关键变化' : '常规变化']]) {
+    const item = document.createElement('div'); const term = document.createElement('dt'); const detail = document.createElement('dd');
+    term.textContent = label; detail.textContent = value; item.append(term, detail); meta.append(item);
+  }
+
+  const evidence = document.createElement('section'); evidence.className = 'diff-inspector-evidence';
+  const title = document.createElement('div'); title.className = 'diff-inspector-evidence-title';
+  title.innerHTML = `<div><small>字段证据</small><strong>基准版本 → 对比版本</strong></div><span><i class="ph ph-eye" aria-hidden="true"></i> 只读</span>`;
+  const headings = document.createElement('div'); headings.className = 'diff-inspector-columns';
+  headings.innerHTML = '<span>字段</span><span>基准版本</span><span></span><span>对比版本</span><span>类型</span>';
+  const rows = document.createElement('div'); rows.className = 'diff-inspector-fields';
+  group.changes.slice(0, 8).forEach(change => rows.append(createBackupDiffFieldRow(change)));
+  evidence.append(title, headings, rows);
+  if (group.changes.length > 8) {
+    const more = document.createElement('details'); more.className = 'diff-inspector-more';
+    const summary = document.createElement('summary'); summary.innerHTML = `<span>查看全部字段（${group.changes.length} 项）</span><i class="ph ph-caret-down" aria-hidden="true"></i>`;
+    const remaining = document.createElement('div'); remaining.className = 'diff-inspector-fields';
+    group.changes.slice(8).forEach(change => remaining.append(createBackupDiffFieldRow(change)));
+    more.append(summary, remaining); evidence.append(more);
+  }
+  root.append(header, meta, evidence);
+}
+
+function selectBackupDiffGroup(groupId, {reveal = false} = {}) {
+  backupDiffSelectedGroupId = groupId;
+  document.querySelectorAll('[data-diff-group-id]').forEach(button => {
+    const selected = button.dataset.diffGroupId === groupId;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  renderBackupDiffInspector(backupDiffChanges.find(group => group.group_id === groupId));
+  if (reveal && window.matchMedia('(max-width: 1180px)').matches) {
+    document.querySelector('#diff-inspector').scrollIntoView({block:'start'});
+  }
+}
+
+function renderBackupDiffChanges() {
+  const root = document.querySelector('#diff-changes'); root.innerHTML = '';
+  if (!backupDiffChanges.length) {
+    backupDiffSelectedGroupId = null;
+    root.innerHTML = '<div class="empty">当前筛选条件下没有变化</div>';
+    renderBackupDiffInspector(null);
+    return;
+  }
+  if (!backupDiffChanges.some(group => group.group_id === backupDiffSelectedGroupId)) {
+    backupDiffSelectedGroupId = backupDiffChanges[0].group_id;
+  }
+  const icons = {players:'ph-user', pals:'ph-paw-print', containers:'ph-archive', guilds:'ph-buildings', world:'ph-globe', files:'ph-file'};
+  let section = null;
+  let currentCategory = '';
+  for (const group of backupDiffChanges) {
+    if (currentCategory !== group.category) {
+      currentCategory = group.category;
+      section = document.createElement('section'); section.className = 'diff-timeline-section';
+      const category = backupDiffMeta.categories.find(item => item.key === group.category);
+      const heading = document.createElement('header'); heading.className = 'diff-group-label';
+      heading.innerHTML = `<span class="diff-timeline-marker"><i class="ph ${icons[group.category] || 'ph-file'}" aria-hidden="true"></i></span><div><small>区间内变化</small><strong></strong></div><span class="diff-group-count"></span>`;
+      heading.querySelector('strong').textContent = group.category_label;
+      heading.querySelector('.diff-group-count').textContent = `${category?.total.toLocaleString() || 0} 个对象`;
+      section.append(heading); root.append(section);
+    }
+    const row = document.createElement('button'); row.type = 'button'; row.className = `diff-timeline-row ${group.change_type}`;
+    row.dataset.diffGroupId = group.group_id;
+    row.setAttribute('aria-pressed', String(group.group_id === backupDiffSelectedGroupId));
+    row.classList.toggle('active', group.group_id === backupDiffSelectedGroupId);
+    const focus = document.createElement('span'); focus.className = 'diff-focus-icon';
+    focus.innerHTML = group.important ? '<i class="ph ph-star" aria-label="关键变化"></i>' : '<i class="ph ph-dot-outline" aria-hidden="true"></i>';
+    const identity = document.createElement('span'); identity.className = 'diff-identity';
+    const title = document.createElement('strong'); title.textContent = group.entity_label;
+    const id = document.createElement('small'); id.textContent = `${group.entity_type_label} · ${group.entity_id}`; identity.append(title, id);
+    const preview = document.createElement('span'); preview.className = 'diff-preview'; preview.textContent = backupDiffGroupSummary(group);
+    const type = document.createElement('span'); type.className = `diff-type ${group.change_type}`; type.textContent = group.change_type_label;
+    const count = document.createElement('span'); count.className = 'diff-field-count'; count.textContent = `${group.field_count} 项`;
+    const arrow = document.createElement('i'); arrow.className = 'ph ph-caret-right diff-chevron'; arrow.setAttribute('aria-hidden', 'true');
+    row.append(focus, identity, preview, type, count, arrow);
+    row.addEventListener('click', () => selectBackupDiffGroup(group.group_id, {reveal:true}));
+    section.append(row);
+  }
+  selectBackupDiffGroup(backupDiffSelectedGroupId);
+}
+
+async function loadBackupDiffChanges({append = false} = {}) {
+  if (!backupDiffJobId || (append && backupDiffFilters.loading)) return;
+  if (!append) backupDiffRequest?.abort();
+  const request = new AbortController();
+  const requestId = ++backupDiffRequestId;
+  backupDiffRequest = request;
+  backupDiffFilters.loading = true;
+  document.querySelector('#diff-browser').setAttribute('aria-busy', 'true');
+  const more = document.querySelector('#diff-more');
+  if (append) { more.disabled = true; more.textContent = '正在加载…'; }
+  if (!append) {
+    backupDiffFilters.offset = 0; backupDiffChanges = [];
+    document.querySelector('#diff-changes').innerHTML = '<div class="empty">正在筛选变化…</div>';
+  }
+  const params = new URLSearchParams({offset:String(backupDiffFilters.offset), limit:'25'});
+  if (backupDiffFilters.category) params.set('category', backupDiffFilters.category);
+  if (backupDiffFilters.changeType) params.set('change_type', backupDiffFilters.changeType);
+  if (backupDiffFilters.query) params.set('q', backupDiffFilters.query);
+  if (backupDiffFilters.importantOnly) params.set('important_only', 'true');
+  try {
+    const response = await fetch(`/api/backups/diffs/${encodeURIComponent(backupDiffJobId)}/groups?${params}`, {signal:request.signal});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '差异明细读取失败');
+    if (requestId !== backupDiffRequestId) return;
+    backupDiffChanges = append ? [...backupDiffChanges, ...data.groups] : data.groups;
+    backupDiffFilters.offset = data.offset + data.groups.length;
+    backupDiffFilters.nextOffset = data.next_offset;
+    document.querySelector('#diff-result-summary').textContent = `变化轨迹包含 ${data.count.toLocaleString()} 个对象 · ${data.field_count.toLocaleString()} 项字段证据 · 已显示 ${backupDiffChanges.length.toLocaleString()} 个对象${backupDiffMeta?.cached ? ' · 本地缓存' : ''}`;
+    document.querySelector('#diff-more').classList.toggle('hidden', data.next_offset == null);
+    renderBackupDiffChanges();
+  } catch (error) {
+    if (error.name === 'AbortError' || requestId !== backupDiffRequestId) return;
+    document.querySelector('#diff-changes').innerHTML = '<div class="empty"></div>';
+    document.querySelector('#diff-changes .empty').textContent = error.message;
+  } finally {
+    if (requestId === backupDiffRequestId) {
+      backupDiffRequest = null;
+      backupDiffFilters.loading = false;
+      document.querySelector('#diff-browser').setAttribute('aria-busy', 'false');
+      more.disabled = false;
+      more.textContent = '继续加载';
+    }
+  }
 }
 
 function showResourceTab(name, {fromRoute = false} = {}) {
@@ -2662,6 +3172,37 @@ document.querySelectorAll('[data-resource-tab]').forEach(button => button.addEve
 document.querySelector('#reload-backups').addEventListener('click', loadBackups);
 document.querySelector('#backup-query').addEventListener('input', renderBackups);
 document.querySelector('#backup-source').addEventListener('change', renderBackups);
+document.querySelector('#swap-backups').addEventListener('click', swapSelectedBackups);
+document.querySelector('#start-backup-diff').addEventListener('click', startBackupDiff);
+document.querySelector('#diff-swap').addEventListener('click', () => {
+  swapSelectedBackups();
+  populateDiffVersionSelectors();
+});
+function syncDiffVersionSelectors() {
+  selectedBackupIds = [document.querySelector('#diff-base-select').value, document.querySelector('#diff-target-select').value].filter(Boolean);
+  renderBackups(); syncBackupCompareTray();
+  const validation = backupDiffValidation();
+  document.querySelector('#diff-run').disabled = !validation.valid;
+  document.querySelector('#diff-world-state').classList.toggle('error', !validation.valid);
+  document.querySelector('#diff-world-state').innerHTML = validation.valid
+    ? '<i class="ph ph-check-circle" aria-hidden="true"></i> 同一世界'
+    : `<i class="ph ph-warning-circle" aria-hidden="true"></i> ${validation.message}`;
+}
+document.querySelector('#diff-base-select').addEventListener('change', syncDiffVersionSelectors);
+document.querySelector('#diff-target-select').addEventListener('change', syncDiffVersionSelectors);
+document.querySelector('#diff-run').addEventListener('click', startBackupDiff);
+document.querySelector('#diff-retry').addEventListener('click', startBackupDiff);
+document.querySelector('[data-diff-category=""]').addEventListener('click', () => setBackupDiffCategory(''));
+document.querySelectorAll('[data-diff-type]').forEach(button => button.addEventListener('click', () => setBackupDiffType(button.dataset.diffType)));
+let backupDiffQueryTimer;
+document.querySelector('#diff-query').addEventListener('input', event => {
+  clearTimeout(backupDiffQueryTimer);
+  backupDiffQueryTimer = setTimeout(() => { backupDiffFilters.query = event.target.value.trim(); loadBackupDiffChanges(); }, 220);
+});
+document.querySelector('#diff-important-only').addEventListener('change', event => {
+  backupDiffFilters.importantOnly = event.target.checked; loadBackupDiffChanges();
+});
+document.querySelector('#diff-more').addEventListener('click', () => loadBackupDiffChanges({append:true}));
 document.querySelector('#reload-map').addEventListener('click', () => { mapData = null; loadWorldMap(); });
 document.querySelector('#show-map-players').addEventListener('change', event => document.querySelector('#map-player-layer').classList.toggle('hidden', !event.target.checked));
 document.querySelector('#show-base-camps').addEventListener('change', event => document.querySelector('#base-camp-layer').classList.toggle('hidden', !event.target.checked));

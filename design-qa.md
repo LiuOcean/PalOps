@@ -70,3 +70,200 @@
 远端快照仅下载到临时目录。未改动仓库 `Save/`，也未在目标服务器执行保存、停服、重启或覆盖；远端与本地快照的新鲜度及哈希仅在本地验收，不写入报告。
 
 final result: passed
+
+---
+
+## Backup Diff Design QA
+
+### Scope
+
+- Surface: PalOps backup browser and read-only backup diff workspace.
+- Reference: Product Design selection-state mock and detailed-result mock from the current design session.
+- Implementation evidence: `palops-backup-diff-selection-impl.png` and `palops-backup-diff-result-impl.png` in the session-local visualization directory. These captures are intentionally not tracked because they contain local runtime data.
+- Comparison evidence: `palops-backup-diff-selection-compare.png`, `palops-backup-diff-result-compare.png`, and `palops-backup-diff-result-focus-compare.png` in the same session-local directory.
+- Desktop viewport: 1440 × 1024 CSS pixels.
+- Responsive viewport: 390 × 844 CSS pixels.
+
+### Required states
+
+| State | Result |
+| --- | --- |
+| No selection | Existing backup browser remains usable; comparison tray stays hidden. |
+| One version selected | Tray identifies the selected version and asks for a second version. |
+| Two versions selected | Older backup becomes the default base, newer backup becomes the target; swap remains available. |
+| Invalid pair | Comparison is disabled when the versions have no common world or no comparable `Level.sav`. |
+| Loading | Dedicated progress panel explains parsing and cache behavior. |
+| Ready | Summary, categories, search, type filters, important-only filter, and paginated changes are visible. |
+| Error | Failure is rendered in the diff workspace without mutating backups. |
+| Mobile | Controls stack vertically, categories remain reachable, and the existing bottom navigation is preserved. |
+
+### Visual comparison
+
+- Hierarchy matches the references: version selection precedes the summary, then category navigation and field-level changes.
+- The implementation reuses PalOps typography, lime/blue status colors, surfaces, borders, icons, and compact operator density.
+- The selection state keeps the existing backup details panel instead of replacing it with a duplicate comparison summary; the persistent comparison tray carries the A/B state.
+- The result state uses five summary cards rather than a single compressed strip so all totals remain legible at the existing PalOps content width.
+- Field-level rows keep base and target values aligned and use color only as a secondary status cue.
+
+### Interaction verification
+
+| Interaction | Result |
+| --- | --- |
+| Select two newest backups | Passed; base and target were ordered chronologically. |
+| Start comparison | Passed; 3,100 semantic changes loaded from the real local backup pair. |
+| Cached rerun | Passed; the result summary reported a cache hit. |
+| Category + modified filter | Passed; guild changes narrowed to 18 rows. |
+| Important-only filter | Passed; the same selection narrowed to 2 rows. |
+| Desktop responsive check | Passed. |
+| 390 px mobile check | Passed; no visible horizontal clipping in the tested states. |
+
+### Issue history
+
+1. P2: asset caching initially displayed the new markup with an older stylesheet. Fixed by versioning the changed CSS and JavaScript asset URLs.
+2. P2: selecting the newest backup first initially reversed the expected comparison direction. Fixed by sorting the initial pair by creation time while keeping the explicit swap action.
+3. P3 tooling note: the in-app browser connection did not expose a stable console-log reader. Final page loads, API requests, interactive states, and server responses completed without a surfaced runtime error state.
+
+### Automated verification
+
+- Full pytest suite passed.
+- JavaScript syntax check passed.
+- `git diff --check` passed.
+
+### Final result
+
+passed
+
+---
+
+## Backup Diff Timeline Redesign QA
+
+### Audit scope
+
+- Selected reference: Product Design concept 3, a change-timeline workspace with a persistent evidence inspector.
+- Reference image: `/Users/lac_123_1234/.codex/generated_images/019f662d-38be-7bb1-80c2-c46e12e02f54/exec-43213712-d084-4714-b197-01740bfcb1b0.png`.
+- Live state: `http://127.0.0.1:18766/#/world/backups/compare` with a real local backup pair.
+- Truth constraint: the API exposes two snapshot times but no exact time for each intermediate change, so timeline nodes are explicitly labeled as changes within the interval instead of presenting invented timestamps.
+
+### Reference comparison
+
+| Area | Result |
+| --- | --- |
+| Version context | Passed; the base and target snapshots, interval, same-world validation, swap, and rerun controls fit in one compact desktop row. |
+| Narrative hierarchy | Passed; snapshot boundaries frame a category-based change timeline and the summary remains visible above it. |
+| Evidence inspection | Passed; selecting a business object updates a persistent before/after inspector without losing timeline position. |
+| Density | Passed; the desktop workspace has bounded internal scrolling and long field values are clamped with their full value available as a title. |
+| Responsive layout | Passed at 390 x 844; the page has no horizontal overflow and selecting an item reveals the inspector below the timeline. |
+
+### Interaction verification
+
+| Interaction | Result |
+| --- | --- |
+| Object selection | Passed; selected state and inspector content update together. |
+| Category filter | Passed; the guild category narrowed the real result to 5 objects and 31 fields. |
+| Combined filters | Passed; guild, modified-only, and important-only narrowed the result to 2 objects and 2 fields. |
+| Pagination and request ownership | Passed; existing page and latest-request behavior remain intact. |
+| Console | Passed; no browser console errors were observed during the inspected flow. |
+
+### Resolved findings
+
+1. P2: the version context wrapped into two rows at 1440 px. Fixed with a compact single-row desktop layout.
+2. P2: the comparison workspace stretched with the full result and weakened the timeline/inspector relationship. Fixed with a bounded desktop workspace and independent scrolling.
+3. P2: legacy summary styles split the primary count awkwardly. Fixed with one headline and separate contextual copy.
+4. P2: verbose values overwhelmed the inspector and a raw owner label leaked implementation language. Fixed with value clamping and the user-facing `对象本身` label.
+
+### Automated verification
+
+- Full suite reached 119 passing tests with one stale static signature assertion; that assertion was updated for the new optional reveal parameter.
+- The targeted static UI suite then passed: 2 tests.
+- JavaScript syntax check passed.
+- Git whitespace validation passed.
+
+### Final result
+
+passed
+
+---
+
+## Backup Diff Information Architecture QA
+
+### Audit scope
+
+- Reference: `/Users/lac_123_1234/.codex/generated_images/019f65db-881d-7670-92b4-c78cbb9eef71/exec-b783a279-0518-481a-a8e7-445ad73d3930.png`.
+- Live state: `http://127.0.0.1:18766/#/world/backups/compare` with a real local backup pair.
+- Primary objective: make the result understandable at business-object level before exposing technical field changes.
+
+### Reference comparison
+
+| Area | Result |
+| --- | --- |
+| Version context | Passed; two bordered version cards, swap control, same-world state, and rerun action precede the result. |
+| Summary hierarchy | Passed; one integrated overview strip now replaces five competing metric cards. |
+| Category navigation | Passed; the left rail mirrors the reference and reports business-object counts. |
+| Detail density | Passed; player, inventory, pal, container-slot, guild-member, and base changes roll up to their owning object. |
+| Progressive disclosure | Passed; the first object is open for orientation and remaining field details expand on demand. |
+| Responsive layout | Passed at the active desktop viewport; the rerun action no longer collapses vertically. |
+
+### Data integration evidence
+
+- The real comparison is summarized as 144 affected business objects instead of 3,069 flat field rows.
+- The category totals resolve to 14 players, 101 containers, 5 guilds, 1 world summary, and 23 files.
+- Field-level evidence remains available inside each object group and keeps the base and target values aligned.
+
+### Interaction verification
+
+| Interaction | Result |
+| --- | --- |
+| Container category | Passed; narrowed to 101 objects and 1,470 field changes. |
+| Modified-only filter | Passed; narrowed the container state to 51 objects and 558 field changes. |
+| Expand/collapse | Passed; the first object toggled without losing filter or pagination state. |
+| Restore all changes | Passed; returned to 144 objects and 3,069 field changes. |
+
+### Automated verification
+
+- 120 pytest tests passed in 138.63 seconds.
+- JavaScript syntax check passed.
+- Targeted backup diff and static UI checks passed.
+
+### Final result
+
+passed
+
+---
+
+## Backup Diff Polish QA
+
+### Audit scope
+
+- Flow: select two backups, generate a semantic diff, narrow the result, rerun the comparison, and recover from a failed request.
+- Target: the existing PalOps desktop backup workflow and its read-only comparison workspace.
+- Accessibility checks in this pass: status announcements, disabled invalid actions, explicit validation copy, and busy-state exposure. Keyboard order and screen-reader output still require dedicated assistive-technology testing.
+
+### Flow health
+
+| Step | Health | Evidence |
+| --- | --- | --- |
+| 1. Select base and target versions | Passed | The pair is ordered chronologically and the common-world check enables comparison. |
+| 2. Generate the comparison | Passed | The cached semantic result rendered with summary totals, categories, filters, and paginated rows. |
+| 3. Narrow the result | Passed | Category, change type, and important-only filters produced one internally consistent final state. |
+| 4. Rerun the comparison | Passed | Query, category, change type, important-only, pagination, and loading state reset before the new result appeared. |
+| 5. Validate an invalid pair | Passed | Selecting the same version shows a specific error and disables the comparison action. |
+| 6. Recover from a request failure | Passed | The error panel removes the irrelevant progress note and exposes both retry and return actions; retry restores the result after the service is available. |
+
+### Resolved findings
+
+1. P1: overlapping filter requests could leave controls and rows describing different filters. Fixed with request cancellation and latest-request ownership.
+2. P2: rerunning or changing the version pair could inherit the previous result filters. Fixed with an explicit comparison-state reset.
+3. P2: the failure state had no direct recovery action. Fixed with in-place retry and return-to-list actions.
+4. P3: invalid version copy grouped multiple causes into one message. Fixed with separate messages for missing versions, identical versions, and no common world.
+5. P3: asynchronous result changes did not expose a busy state. Fixed with `aria-busy` on the loading and diff result regions.
+
+### Verification
+
+- Targeted backup and UI tests passed.
+- JavaScript syntax check passed.
+- Real local backup flow passed for cached load, combined filters, rerun reset, invalid-pair validation, failure rendering, and retry recovery.
+- Visual inspection passed at the existing desktop viewport; no new visual system or component language was introduced.
+
+### Final result
+
+passed

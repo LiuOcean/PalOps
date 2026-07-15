@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .backup_diff import BackupDiffService, DEFAULT_DIFF_DB
 from .backups import delete_backup, list_backups, prepare_backup_restore, restore_backup
 from .chat import DEFAULT_CHAT_DB, archive_system_message, sync_chat_history
 from .items import get_item, search_items
@@ -37,6 +38,7 @@ DEFAULT_SAVE_ROOT = Path.cwd() / "Save"
 DEFAULT_SYNC_BACKUP_ROOT = Path.cwd() / ".paledit-backups"
 
 LOGGER = logging.getLogger(__name__)
+BACKUP_DIFF_SERVICE = BackupDiffService()
 
 
 def _game_backup_root() -> Path | None:
@@ -64,6 +66,7 @@ async def lifespan(_: FastAPI):
         sampler.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sampler
+        BACKUP_DIFF_SERVICE.shutdown()
 
 app = FastAPI(title="PalOps", version=__version__, lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=STATIC_ROOT), name="assets")
@@ -173,6 +176,84 @@ def backups() -> dict[str, object]:
         return list_backups(DEFAULT_SAVE_ROOT, DEFAULT_SYNC_BACKUP_ROOT, _game_backup_root())
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=500, detail=f"读取本地备份失败：{error}") from error
+
+
+@app.post("/api/backups/diffs")
+def create_backup_diff(payload: dict = Body(...)) -> dict[str, object]:
+    try:
+        return BACKUP_DIFF_SERVICE.start(
+            str(payload["base_backup_id"]),
+            str(payload["target_backup_id"]),
+            str(payload["world_id"]),
+            DEFAULT_SAVE_ROOT,
+            DEFAULT_SYNC_BACKUP_ROOT,
+            _game_backup_root(),
+            DEFAULT_DIFF_DB,
+        )
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (OSError, RuntimeError) as error:
+        raise HTTPException(status_code=500, detail=f"创建版本比较失败：{error}") from error
+
+
+@app.get("/api/backups/diffs/{job_id}")
+def backup_diff_status(job_id: str) -> dict[str, object]:
+    try:
+        return BACKUP_DIFF_SERVICE.status(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
+
+
+@app.get("/api/backups/diffs/{job_id}/changes")
+def backup_diff_changes(
+    job_id: str,
+    category: str = Query(default=""),
+    change_type: str = Query(default=""),
+    q: str = Query(default=""),
+    important_only: bool = Query(default=False),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> dict[str, object]:
+    try:
+        return BACKUP_DIFF_SERVICE.changes(
+            job_id,
+            category=category,
+            change_type=change_type,
+            query=q,
+            important_only=important_only,
+            offset=offset,
+            limit=limit,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/backups/diffs/{job_id}/groups")
+def backup_diff_groups(
+    job_id: str,
+    category: str = Query(default=""),
+    change_type: str = Query(default=""),
+    q: str = Query(default=""),
+    important_only: bool = Query(default=False),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict[str, object]:
+    try:
+        return BACKUP_DIFF_SERVICE.groups(
+            job_id,
+            category=category,
+            change_type=change_type,
+            query=q,
+            important_only=important_only,
+            offset=offset,
+            limit=limit,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error.args[0])) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/api/backups/restore/prepare")

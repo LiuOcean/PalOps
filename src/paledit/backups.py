@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import tarfile
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .save import inspect_save, sha256
 
@@ -44,10 +45,37 @@ def _directory_stats(root: Path) -> tuple[int, int, bool]:
     return total_size, file_count, has_level_save
 
 
+def archive_world_ids(path: Path) -> list[str]:
+    """Discover world IDs from a compressed server backup without extracting it."""
+    world_ids: set[str] = set()
+    try:
+        with tarfile.open(path, mode="r:gz") as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                parts = [part for part in PurePosixPath(member.name).parts if part not in {"", "."}]
+                if ".." in parts:
+                    continue
+                for index in range(max(0, len(parts) - 3)):
+                    if (
+                        parts[index:index + 2] == ["SaveGames", "0"]
+                        and index + 3 < len(parts)
+                        and parts[index + 3] == "Level.sav"
+                    ):
+                        world_id = parts[index + 2]
+                        if world_id not in {"", ".", ".."}:
+                            world_ids.add(world_id)
+    except (OSError, tarfile.TarError):
+        return []
+    return sorted(world_ids)
+
+
 def _backup_row(path: Path, source: str, world_ids: list[str]) -> dict[str, object]:
     is_archive = path.is_file()
     if is_archive:
-        size_bytes, file_count, has_level_save = path.stat().st_size, 1, False
+        discovered_world_ids = archive_world_ids(path)
+        world_ids = [*world_ids, *discovered_world_ids]
+        size_bytes, file_count, has_level_save = path.stat().st_size, 1, bool(discovered_world_ids)
     else:
         size_bytes, file_count, has_level_save = _directory_stats(path)
     stat = path.stat()

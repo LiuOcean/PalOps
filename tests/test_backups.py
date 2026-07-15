@@ -1,3 +1,5 @@
+import io
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -75,6 +77,25 @@ def test_list_backups_includes_external_game_backup_archives(tmp_path: Path) -> 
     assert backup["is_archive"] is True
     assert backup["has_level_save"] is False
     assert backup["deletable"] is False
+
+
+def test_list_backups_indexes_worlds_inside_valid_game_archive(tmp_path: Path) -> None:
+    save_root = tmp_path / "Save"
+    _write_world(save_root, "WORLD")
+    game_backup_root = tmp_path / "server" / "backups"
+    game_backup_root.mkdir(parents=True)
+    archive_path = game_backup_root / "palworld-save-valid.tar.gz"
+    payload = _save_payload(b"archived")
+    with tarfile.open(archive_path, "w:gz") as archive:
+        info = tarfile.TarInfo("Pal/Saved/SaveGames/0/WORLD/Level.sav")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+
+    backup = list_backups(save_root, tmp_path / ".paledit-backups", game_backup_root)["backups"][0]
+
+    assert backup["world_ids"] == ["WORLD"]
+    assert backup["has_level_save"] is True
+    assert backup["is_archive"] is True
 
 
 def test_list_backups_ignores_symlinked_snapshot(tmp_path: Path) -> None:
